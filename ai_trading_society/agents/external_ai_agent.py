@@ -15,11 +15,11 @@ can mark it as failed and display it accordingly.
 """
 
 import json
+import math
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from ..base_agent import BaseAgent
-
 
 # Provider presets: maps provider name → base_url.
 # base_url=None means use the SDK's default endpoint.
@@ -154,13 +154,12 @@ class ExternalAIAgent(BaseAgent):
         self._market_history: list[tuple[int, float]] = []
 
         # Resolve base_url from preset if not explicitly provided.
+        self.base_url: Optional[str] = None
         preset = _PROVIDER_PRESETS.get(api_provider)
         if base_url is not None:
             self.base_url = base_url
         elif preset is not None:
             self.base_url = preset
-        else:
-            self.base_url = None
 
         # API keys come only from the user's configuration; never from
         # environment variables or a .env file.
@@ -181,14 +180,15 @@ class ExternalAIAgent(BaseAgent):
             "- You cannot borrow money (cash >= 0).\n"
             "- Each step, decide: BUY, SELL, or HOLD.\n\n"
             "Response style — CRITICAL:\n"
-            "- Answer like a trader shouting an order: fast and terse.\n"
-            "- 'reasoning': at most 2 short sentences, under 25 words total. "
-            "No analysis essays, no hedging.\n"
+            "- Answer like a trader calling an order with a short rationale.\n"
+            "- 'reasoning': 2-3 short sentences, under 50 words total. "
+            "Give a concise take on the move and your plan. No long essays, no hedging.\n"
             "- Output ONLY the JSON object. No markdown, no code fences, "
             "no preamble, no explanations outside the JSON.\n\n"
-            "You remember past decisions; learn from them in one line.\n\n"
+            "You remember past decisions; learn from them.\n\n"
             "Respond in valid JSON only:\n"
-            '{"action": "buy"|"sell"|"hold", "quantity": <int>, "reasoning": "<max 2 short sentences>"}'
+            '{"action": "buy"|"sell"|"hold", "quantity": <int>, '
+            '"reasoning": "<2-3 short sentences>"}'
         )
 
     def _build_market_summary(self) -> str:
@@ -254,7 +254,7 @@ class ExternalAIAgent(BaseAgent):
                     # Keep each memory line short: truncate long reasoning.
                     reasoning_str = (
                         reasoning_match.group(1) if reasoning_match else ""
-                    )[:60]
+                    )[:90]
                     decisions.append(
                         f"  Step {round_num}: {action_str.upper()} {qty_str} — {reasoning_str}"
                     )
@@ -420,7 +420,9 @@ class ExternalAIAgent(BaseAgent):
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
 
-        client = openai.OpenAI(**client_kwargs)
+        # client_kwargs is built dynamically for OpenAI-compatible providers,
+        # so mypy cannot validate the expanded kwargs here.
+        client = openai.OpenAI(**client_kwargs)  # type: ignore[arg-type]
 
         if messages is None:
             # Trading mode: system prompt + memory + new user message.
@@ -518,7 +520,7 @@ class ExternalAIAgent(BaseAgent):
             system=system,
             messages=messages,
         )
-        return response.content[0].text
+        return str(getattr(response.content[0], "text", ""))
 
     def _call_google(
         self,
@@ -560,18 +562,21 @@ class ExternalAIAgent(BaseAgent):
             if not conv:
                 response = model.generate_content(prompt)
             else:
-                chat = model.start_chat(history=conv[:-1])
+                chat = model.start_chat(history=cast(Any, conv[:-1]))
                 response = chat.send_message(conv[-1]["parts"])
         elif self.enable_memory and self._conversation_history:
-            chat = model.start_chat(history=[
-                {"role": "user" if msg["role"] == "user" else "model",
-                 "parts": msg["content"]}
-                for msg in self._conversation_history
-            ])
+            chat = model.start_chat(history=cast(
+                Any,
+                [
+                    {"role": "user" if msg["role"] == "user" else "model",
+                     "parts": msg["content"]}
+                    for msg in self._conversation_history
+                ],
+            ))
             response = chat.send_message(prompt)
         else:
             response = model.generate_content(prompt)
-        return response.text
+        return str(response.text)
 
     # ------------------------------------------------------------------
     # Response parsing
@@ -592,6 +597,10 @@ class ExternalAIAgent(BaseAgent):
         if isinstance(value, bool):
             return None
         if isinstance(value, (int, float)):
+            # Reject NaN/Infinity, which json.loads accepts by default and
+            # which int() would otherwise turn into a ValueError/OverflowError.
+            if not math.isfinite(value):
+                return None
             return int(value)
         if isinstance(value, str):
             text = value.strip().lower()

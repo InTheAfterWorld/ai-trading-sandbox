@@ -7,24 +7,23 @@ AI decision makers behave in a virtual stock market.
 Runs one unified sandbox where AI agents, market events, and an optional-action player coexist.
 """
 
-from .config import MarketConfig, AgentConfig
 from .base_agent import BaseAgent
+from .config import MarketConfig
 from .market_env import MarketEnv
+from .market_events import EVENT_TEMPLATES, EventManager, MarketEvent
+from .run_metadata import RunMetadata, load_run_snapshot, save_run_snapshot, set_seed
 from .simulator import Simulator
-from .run_metadata import RunMetadata, set_seed, load_run_snapshot, save_run_snapshot
-from .market_events import EventManager, MarketEvent, EVENT_TEMPLATES
 from .visualization import (
+    generate_all_charts,
+    plot_final_rankings,
     plot_price_history,
     plot_wealth_timeline,
-    plot_final_rankings,
-    generate_all_charts,
 )
 
 __version__ = "0.2.0"
 __all__ = [
     # Core
     "MarketConfig",
-    "AgentConfig",
     "BaseAgent",
     "MarketEnv",
     "Simulator",

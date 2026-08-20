@@ -5,9 +5,9 @@ Usage:
     python run.py             # Start the Web Dashboard (default)
     python run.py --cli       # Run terminal interactive mode
     python run.py --port 8080 # Custom port for Web Dashboard
+    python run.py --debug     # Enable Flask debug mode (auto-reload)
 """
 
-import sys
 import argparse
 
 
@@ -41,6 +41,11 @@ def main():
         help="CLI: override the API key from the saved configuration",
     )
     parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Run the Web Dashboard with Flask debug mode (auto-reload, verbose errors)",
+    )
+    parser.add_argument(
         "--steps",
         type=int,
         help="CLI: number of simulation steps (default: saved config)",
@@ -62,7 +67,7 @@ def main():
         print(f"  Open http://localhost:{args.port} in your browser")
         print("=" * 55 + "\n")
 
-        app.run(debug=True, port=args.port)
+        app.run(debug=args.debug, port=args.port)
 
 
 if __name__ == "__main__":

@@ -1,12 +1,10 @@
 """Tests for market events: multi-trigger, lifecycle, combined effects."""
 
-import pytest
 
 from ai_trading_society.market_events import (
     EventManager,
-    MarketEvent,
     EventType,
-    EVENT_TEMPLATES,
+    MarketEvent,
 )
 
 

@@ -4,13 +4,12 @@ Unified Agent Roster Factory.
 Centralizes the creation and setup of trading agents for both Web UI and CLI modes.
 """
 
-import os
-from typing import List, Tuple, Optional
+from typing import Any, List, Optional, Tuple
 
-from .external_ai_agent import ExternalAIAgent, _DEFAULT_MODELS
-from .traits import create_personality_agent
-from .player_agent import PlayerAgent
 from ..base_agent import BaseAgent
+from .external_ai_agent import _DEFAULT_MODELS, ExternalAIAgent
+from .player_agent import PlayerAgent
+from .traits import create_personality_agent
 
 # Standard AI model roster definitions
 DEFAULT_AI_MODELS = [
@@ -24,16 +23,8 @@ DEFAULT_AI_MODELS = [
     ("deepseek-r1",           "emotional"),
 ]
 
-# Agent IDs in order of DEFAULT_AI_MODELS
-AGENT_IDS = [
-    "gpt-oss-20b",
-    "gemini-3.1-flash-lite",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-pro",
-    "gemini-3-flash",
-    "deepseek-r1",
-]
+# Agent IDs in order of DEFAULT_AI_MODELS (derived, never manually duplicated)
+AGENT_IDS = [model for model, _ in DEFAULT_AI_MODELS]
 
 # Social relationships between agents: each agent has idol, friends, enemies
 # Keys are personality names, values are dicts with 'idol', 'friends', 'enemies' (agent IDs)
@@ -111,7 +102,9 @@ def resolve_social_map(agents) -> dict:
     for agent in agents:
         aid = agent.agent_id
         pkey = _agent_personality(agent) or "balanced"
-        rel = SOCIAL_MAP.get(pkey, {"idol": None, "friends": [], "enemies": []})
+        rel: dict[str, Any] = SOCIAL_MAP.get(
+            pkey, {"idol": None, "friends": [], "enemies": []}
+        )
 
         def _find(target_id, exclude=aid):
             if not target_id:
@@ -180,10 +173,15 @@ def build_agent_roster(
         Reference to the player agent, which may trade or simply observe.
     """
     agents: List[BaseAgent] = []
-    configs = trader_configs or [
-        {"name": f"Trade {index}", "provider": provider, "model": model, "api_key": api_key}
-        for index, _ in enumerate(DEFAULT_AI_MODELS, 1)
-    ]
+    # Only fall back to the default roster when no trader list was provided
+    # at all (None). An explicit empty list [] means "no AI traders" and must
+    # be respected (e.g. a pure-observer / player-only run).
+    if trader_configs is None:
+        trader_configs = [
+            {"name": f"Trade {index}", "provider": provider, "model": model, "api_key": api_key}
+            for index, _ in enumerate(DEFAULT_AI_MODELS, 1)
+        ]
+    configs = trader_configs
     # Build exactly one AI agent per configured trader (defaulting to the
     # full default roster when no trader list is provided), so traders can be
     # added or removed from the homepage and the roster follows along.

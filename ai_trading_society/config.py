@@ -45,10 +45,26 @@ class MarketConfig:
     random_traits: bool = True
     """Whether roster construction may assign randomized personality traits."""
 
+    # --- Social influence ---
+    social_influence: float = 0.0
+    """Strength of social-relationship-driven behavior (0.0 = off, 1.0 = strong).
+    Friends/idol trades are mimicked, enemies are faded, creating herding
+    and bank-run cascades."""
+
     # --- Reproducibility / Random seed ---
     seed: Optional[int] = None
     """Random seed for reproducibility. If None, auto-generated at run start."""
 
+    def __post_init__(self) -> None:
+        """Clamp transaction-cost rates to a safe range.
+
+        A ``fee_rate`` or ``slippage_rate`` >= 1 would make a seller receive
+        negative revenue (revenue = value * (1 - slippage) * (1 - fee)),
+        silently driving cash below zero with no way to recover. Clamp both
+        to [0, 0.5] so any entry point (web, CLI, direct construction) is safe.
+        """
+        self.fee_rate = max(0.0, min(self.fee_rate, 0.5))
+        self.slippage_rate = max(0.0, min(self.slippage_rate, 0.5))
 
     def to_dict(self) -> dict:
         """Serialize MarketConfig to dictionary."""
@@ -63,6 +79,7 @@ class MarketConfig:
             "slippage_rate": self.slippage_rate,
             "event_probability_multiplier": self.event_probability_multiplier,
             "random_traits": self.random_traits,
+            "social_influence": self.social_influence,
             "seed": self.seed,
         }
 
@@ -72,53 +89,3 @@ class MarketConfig:
         data_copy = data.copy()
         data_copy.pop("mode", None)
         return cls(**data_copy)
-
-
-
-@dataclass
-class AgentConfig:
-    """Initial configuration for a single agent."""
-
-    agent_id: str
-    """Unique agent identifier."""
-
-    agent_type: str = "external_ai"
-    """External AI provider such as GPT, Claude, or Gemini."""
-
-    initial_cash: float = 10000.0
-    """Initial cash balance."""
-
-    initial_holdings: int = 0
-    """Initial share holdings."""
-
-    # --- Strategy parameters ---
-    risk_preference: float = 0.5
-    """Risk preference: 0.0 = conservative, 1.0 = aggressive."""
-
-    lookback: int = 5
-    """Lookback window for trend or contrarian strategies."""
-
-    threshold: float = 0.02
-    """Trigger threshold for price-change-based strategies."""
-
-    fair_value: float = 100.0
-    """Intrinsic value used by value-investing strategies."""
-
-    # --- External AI parameters ---
-    api_provider: Optional[str] = None
-    """API provider. Built-in presets:
-    "openai", "anthropic", "google" (native SDKs);
-    "openrouter", "chatanywhere", "groq", "google_compat" (OpenAI-compatible).
-    """
-
-    model: Optional[str] = None
-    """Model name, e.g. "gpt-4o", "openai/gpt-oss-20b:free", "deepseek-r1"."""
-
-    api_key: Optional[str] = None
-    """API key. Must be provided explicitly; never read from the environment."""
-
-    base_url: Optional[str] = None
-    """Custom API base URL for OpenAI-compatible providers. Overrides preset."""
-
-    system_prompt: Optional[str] = None
-    """Custom system prompt."""

@@ -12,7 +12,6 @@ import json
 import os
 import platform
 import random
-import sys
 import subprocess
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -148,18 +147,22 @@ class RunMetadata:
         # Agent roster snapshot
         agent_roster = []
         for a in agents:
+            # TraitAgent wraps the real agent: provider/model live on the
+            # wrapped base_agent, while the personality name lives on the
+            # wrapper itself.
+            base = getattr(a, "base_agent", a)
             agent_info = {
                 "agent_id": getattr(a, "agent_id", str(a)),
                 "class_name": a.__class__.__name__,
                 "initial_cash": getattr(a, "cash", 0.0),
                 "initial_holdings": getattr(a, "holdings", 0),
             }
-            if hasattr(a, "api_provider"):
-                agent_info["api_provider"] = getattr(a, "api_provider")
-            if hasattr(a, "model"):
-                agent_info["model"] = getattr(a, "model")
-            if hasattr(a, "personality"):
-                agent_info["personality"] = getattr(a, "personality")
+            if hasattr(base, "api_provider"):
+                agent_info["api_provider"] = getattr(base, "api_provider")
+            if hasattr(base, "model"):
+                agent_info["model"] = getattr(base, "model")
+            if hasattr(a, "personality_name"):
+                agent_info["personality"] = getattr(a, "personality_name")
             if hasattr(a, "agent_type"):
                 agent_info["agent_type"] = getattr(a, "agent_type")
             agent_roster.append(agent_info)

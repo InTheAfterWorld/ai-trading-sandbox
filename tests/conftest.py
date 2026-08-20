@@ -27,7 +27,12 @@ class ScriptedExternalAIAgent(ExternalAIAgent):
 @pytest.fixture
 def classic_config():
     """A basic unified sandbox config."""
-    return MarketConfig(initial_price=100.0, price_sensitivity=0.02, max_price_change_ratio=0.06, event_probability_multiplier=0.0)
+    return MarketConfig(
+        initial_price=100.0,
+        price_sensitivity=0.02,
+        max_price_change_ratio=0.06,
+        event_probability_multiplier=0.0,
+    )
 
 
 @pytest.fixture

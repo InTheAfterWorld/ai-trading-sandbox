@@ -84,6 +84,30 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-ap
 }
 .field input:hover{border-color:var(--border-hover);}
 .field input:focus{border-color:var(--purple);box-shadow:0 0 0 3px rgba(167,139,250,.1);}
+/* Range slider: the generic .field input rule above injects padding/border/
+   background that offset the thumb off the 0%–100% track. Reset and draw a
+   custom track/thumb so both ends line up with the container. */
+input[type="range"]{
+  -webkit-appearance:none;appearance:none;
+  width:100%;height:22px;background:transparent;border:none;border-radius:0;
+  padding:0;cursor:pointer;transition:none;
+}
+input[type="range"]::-webkit-slider-runnable-track{
+  height:6px;border-radius:3px;background:var(--border);
+}
+input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+  background:var(--purple);border:2px solid #fff;margin-top:-5px;
+  box-shadow:0 1px 4px rgba(0,0,0,.4);
+}
+input[type="range"]::-moz-range-track{
+  height:6px;border-radius:3px;background:var(--border);
+}
+input[type="range"]::-moz-range-thumb{
+  width:16px;height:16px;border-radius:50%;
+  background:var(--purple);border:2px solid #fff;
+}
+input[type="range"]:focus{outline:none;}
 .error-box{
   display:none;color:var(--red);font-size:12.5px;background:rgba(239,68,68,.08);
   border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:10px 14px;margin-bottom:16px;
@@ -97,6 +121,28 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-ap
 .btn-start:hover{transform:translateY(-2px);box-shadow:0 12px 32px rgba(139,92,246,.35);}
 .btn-start:active{transform:translateY(0);}
 .btn-start:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none;}
+/* Launch progress overlay: covers the home while /api/start initializes agents. */
+.launch-overlay{
+  position:fixed;inset:0;z-index:400;display:none;align-items:center;justify-content:center;
+  background:rgba(11,14,20,.85);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+}
+.launch-overlay.show{display:flex;animation:fadeIn .2s ease;}
+.launch-card{
+  background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);
+  padding:32px 36px;width:360px;max-width:92vw;text-align:center;box-shadow:var(--shadow-lg);
+}
+.launch-title{font-size:16px;font-weight:700;margin-bottom:14px;}
+.launch-sub{font-size:12.5px;color:var(--text-dim);line-height:1.6;min-height:18px;}
+.launch-bar{
+  width:100%;height:5px;border-radius:3px;background:var(--border);margin-top:18px;overflow:hidden;
+}
+.launch-bar span{
+  display:block;height:100%;border-radius:3px;
+  background:linear-gradient(90deg,var(--purple),var(--blue));
+  background-size:200% 100%;animation:shimmer 1.2s linear infinite;
+  width:30%;transition:width .4s ease;
+}
+@keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 .foot-note{
   margin-top:16px;text-align:center;font-size:11px;color:var(--text-dim);opacity:.7;
   display:flex;align-items:center;justify-content:center;gap:5px;
@@ -166,6 +212,14 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-ap
           <div class="field"><label>Rounds</label><input type="number" id="homeStepsInput" value="30" min="1" max="200" oninput="autoSaveConfig()"></div>
           <div class="field"><label>Start Price</label><input type="number" id="homePriceInput" value="100" min="1" oninput="autoSaveConfig()"></div>
         </div>
+        <div class="field-grid" style="margin-top:14px;">
+          <div class="field" style="grid-column:1/-1;">
+            <label>Social Influence <span id="socialInfluenceVal" style="color:var(--purple);font-weight:700;float:right;">0%</span></label>
+            <input type="range" id="homeSocialInput" min="0" max="1" step="0.05" value="0" oninput="document.getElementById('socialInfluenceVal').textContent=Math.round(this.value*100)+'%';autoSaveConfig();">
+            <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);opacity:.7;line-height:1;"><span>0%</span><span>100%</span></div>
+            <div style="font-size:10px;color:var(--text-dim);margin-top:3px;opacity:.7;">Higher = agents herd with friends/idol, fade enemies</div>
+          </div>
+        </div>
       </div>
 
       <div class="field-group">
@@ -186,6 +240,14 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-ap
       </button>
       <div class="foot-note">Your API key stays on this device</div>
     </div>
+  </div>
+</div>
+
+<div class="launch-overlay" id="launchOverlay">
+  <div class="launch-card">
+    <div class="launch-title">Launching Simulation…</div>
+    <div class="launch-sub" id="launchSub">Saving configuration…</div>
+    <div class="launch-bar"><span id="launchBar"></span></div>
   </div>
 </div>
 
@@ -229,6 +291,10 @@ async function loadConfig(){
     if(c.hold)setVal('homeHoldInput',c.hold);
     if(c.fee)setVal('homeFeeInput',c.fee);
     if(c.slip)setVal('homeSlipInput',c.slip);
+    if(c.social_influence!==undefined){
+      setVal('homeSocialInput',c.social_influence);
+      document.getElementById('socialInfluenceVal').textContent=Math.round(parseFloat(c.social_influence)*100)+'%';
+    }
     renderSummary(c.traders||[]);
   }catch(e){}
 }
@@ -246,6 +312,7 @@ function autoSaveConfig(){
     ...existing,
     steps:getVal('homeStepsInput'),price:getVal('homePriceInput'),
     cash:getVal('homeCashInput'),hold:getVal('homeHoldInput'),fee:getVal('homeFeeInput'),slip:getVal('homeSlipInput'),
+    social_influence:getVal('homeSocialInput'),
   };
   localStorage.setItem('ats_config',JSON.stringify(c));
   syncToServer();
@@ -326,6 +393,25 @@ function start(){
   saveConfig();
   const btn=document.getElementById('btnStart');
   btn.disabled=true;btn.innerHTML='Launching… <span style="font-size:16px;">&#8987;</span>';
+  // Show a progress overlay while the sim page initializes all AI agents.
+  const ov=document.getElementById('launchOverlay');
+  const sub=document.getElementById('launchSub');
+  const bar=document.getElementById('launchBar');
+  ov.classList.add('show');
+  const n=(c.traders||[]).length||7;
+  const phases=[
+    {p:15,t:'Saving configuration…'},
+    {p:35,t:`Initializing ${n} AI agents…`},
+    {p:60,t:'Loading market environment…'},
+    {p:80,t:'Preparing charts & leaderboard…'},
+  ];
+  let i=0;
+  bar.style.width=phases[0].p+'%';sub.textContent=phases[0].t;
+  const timer=setInterval(()=>{
+    i++;
+    if(i<phases.length){bar.style.width=phases[i].p+'%';sub.textContent=phases[i].t;}
+    else{clearInterval(timer);}
+  },450);
   setTimeout(()=>{window.location.href='/sim';},300);
 }
 window.addEventListener('DOMContentLoaded',loadConfig);

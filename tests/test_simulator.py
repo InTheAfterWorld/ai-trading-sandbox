@@ -2,6 +2,7 @@
 
 import pytest
 
+from ai_trading_society.agents.player_agent import PlayerAgent
 from ai_trading_society.config import MarketConfig
 from ai_trading_society.market_env import MarketEnv
 from ai_trading_society.simulator import Simulator
@@ -103,7 +104,7 @@ class TestRealisticMode:
 
     def test_triggered_events_appear_in_state(self, realistic_config):
         """When events trigger, they should appear in state as a list."""
-        from ai_trading_society.market_events import EventManager, MarketEvent, EventType
+        from ai_trading_society.market_events import EventManager, EventType, MarketEvent
 
         # Force event triggering by using probability=1.0 templates
         templates = [
@@ -122,7 +123,6 @@ class TestRealisticMode:
             templates=templates,
             event_probability_multiplier=1.0,
         )
-        sim = Simulator(env)
         state = env.step()
         assert "triggered_events" in state, "State should contain triggered_events"
         assert isinstance(state["triggered_events"], list)
@@ -249,3 +249,117 @@ class TestInteractiveMode:
         sim = Simulator(env)
         sim.run(steps=5, verbose=False, round_by_round=True, interactive=False)
         assert call_count[0] == 0
+
+
+class TestInteractiveMenu:
+    """Test the interactive command menu (player trade / God Mode / social)."""
+
+    def _make_sim(self, config):
+        agents = [
+            ScriptedExternalAIAgent("a1", cash=10000, holdings=50),
+            ScriptedExternalAIAgent("a2", cash=10000, holdings=50),
+        ]
+        player = PlayerAgent(agent_id="Player (You)", cash=10000, holdings=20)
+        agents.append(player)
+        env = MarketEnv(config, agents)
+        player._env = env
+        return Simulator(env), player
+
+    def test_menu_continue_on_blank(self, classic_config, monkeypatch):
+        sim, _ = self._make_sim(classic_config)
+        monkeypatch.setattr("builtins.input", lambda *a: "")
+        assert sim._interactive_menu() == "continue"
+
+    def test_menu_stop_on_q(self, classic_config, monkeypatch):
+        sim, _ = self._make_sim(classic_config)
+        monkeypatch.setattr("builtins.input", lambda *a: "q")
+        assert sim._interactive_menu() == "stop"
+
+    def test_menu_unknown_command_loops(self, classic_config, monkeypatch):
+        """Unknown command should not end the round; menu loops to continue."""
+        sim, _ = self._make_sim(classic_config)
+        answers = iter(["bogus", ""])
+        monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+        assert sim._interactive_menu() == "continue"
+
+    def test_menu_buy_then_continue(self, classic_config, monkeypatch):
+        """'b' + quantity buffers a player buy, then blank advances the round."""
+        sim, player = self._make_sim(classic_config)
+        answers = iter(["b", "5", ""])
+        monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+        assert sim._interactive_menu(player) == "continue"
+        assert sim.env.pop_player_action() == {"action": "buy", "quantity": 5}
+
+    def test_cmd_player_trade_buffers_buy(self, classic_config, monkeypatch):
+        sim, player = self._make_sim(classic_config)
+        monkeypatch.setattr("builtins.input", lambda *a: "30")
+        sim._cmd_player_trade(player, "buy")
+        assert sim.env.pop_player_action() == {"action": "buy", "quantity": 30}
+
+    def test_cmd_player_trade_buffers_sell(self, classic_config, monkeypatch):
+        sim, player = self._make_sim(classic_config)
+        monkeypatch.setattr("builtins.input", lambda *a: "10")
+        sim._cmd_player_trade(player, "sell")
+        assert sim.env.pop_player_action() == {"action": "sell", "quantity": 10}
+
+    def test_cmd_player_trade_cancels_on_empty(self, classic_config, monkeypatch):
+        sim, player = self._make_sim(classic_config)
+        monkeypatch.setattr("builtins.input", lambda *a: "")
+        sim._cmd_player_trade(player, "buy")
+        assert sim.env.pop_player_action() is None
+
+    def test_cmd_player_trade_rejects_bad_quantity(self, classic_config, monkeypatch):
+        sim, player = self._make_sim(classic_config)
+        monkeypatch.setattr("builtins.input", lambda *a: "abc")
+        sim._cmd_player_trade(player, "buy")
+        assert sim.env.pop_player_action() is None
+
+    def test_cmd_player_trade_unavailable_without_player(self, classic_config, monkeypatch):
+        sim, _ = self._make_sim(classic_config)
+        monkeypatch.setattr("builtins.input", lambda *a: "10")
+        sim._cmd_player_trade(None, "buy")
+        assert sim.env.pop_player_action() is None
+
+    def test_cmd_god_event_injects_by_number(self, classic_config, monkeypatch):
+        sim, _ = self._make_sim(classic_config)
+        monkeypatch.setattr("builtins.input", lambda *a: "1")
+        sim._cmd_god_event()
+        assert any(e.get("forced") for e in sim.env.event_manager.event_history)
+
+    def test_cmd_god_event_injects_by_name(self, classic_config, monkeypatch):
+        from ai_trading_society.market_events import EVENT_TEMPLATES
+
+        sim, _ = self._make_sim(classic_config)
+        name = EVENT_TEMPLATES[0].name
+        monkeypatch.setattr("builtins.input", lambda *a: name)
+        sim._cmd_god_event()
+        assert sim.env.event_manager.event_history[-1]["name"] == name
+        assert sim.env.event_manager.event_history[-1]["forced"] is True
+
+    def test_cmd_god_config_adjusts_sensitivity(self, classic_config, monkeypatch):
+        sim, _ = self._make_sim(classic_config)
+        answers = iter(["1", "0.05"])
+        monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+        sim._cmd_god_config()
+        assert sim.env.config.price_sensitivity == 0.05
+
+    def test_cmd_god_config_adjusts_event_multiplier(self, classic_config, monkeypatch):
+        sim, _ = self._make_sim(classic_config)
+        answers = iter(["3", "2.5"])
+        monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+        sim._cmd_god_config()
+        assert sim.env.config.event_probability_multiplier == 2.5
+        assert sim.env.event_manager.multiplier == 2.5
+
+    def test_cmd_god_config_adjusts_sentiment_drift(self, classic_config, monkeypatch):
+        sim, _ = self._make_sim(classic_config)
+        answers = iter(["4", "0.3"])
+        monkeypatch.setattr("builtins.input", lambda *a: next(answers))
+        sim._cmd_god_config()
+        assert sim.env._sentiment_drift == 0.3
+
+    def test_show_social_does_not_raise(self, classic_config, capsys):
+        sim, _ = self._make_sim(classic_config)
+        sim._show_social()
+        out = capsys.readouterr().out
+        assert "Social Relationships" in out

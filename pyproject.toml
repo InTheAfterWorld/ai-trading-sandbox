@@ -26,9 +26,10 @@ classifiers = [
 [project.optional-dependencies]
 viz = ["matplotlib>=3.7"]
 config = ["pyyaml>=6.0"]
-ai = ["openai>=1.0", "anthropic>=0.18", "google-generativeai>=0.3", "python-dotenv>=1.0"]
+ai = ["openai>=1.0", "anthropic>=0.18", "google-generativeai>=0.3"]
+web = ["flask>=3.0"]
 dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.1", "mypy>=1.0"]
-all = ["matplotlib>=3.7", "pyyaml>=6.0", "openai>=1.0", "anthropic>=0.18", "google-generativeai>=0.3", "python-dotenv>=1.0"]
+all = ["matplotlib>=3.7", "pyyaml>=6.0", "openai>=1.0", "anthropic>=0.18", "google-generativeai>=0.3", "flask>=3.0"]
 
 [project.scripts]
 ai-trading-society = "ai_trading_society.__main__:main"

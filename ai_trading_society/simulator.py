@@ -5,20 +5,21 @@ It drives MarketEnv for a configured number of steps and prints a summary
 when the run completes.
 """
 
+import csv
 from typing import Any, Dict, List, Optional
 
-from .market_env import MarketEnv
-from .run_metadata import RunMetadata, save_run_snapshot
 from .console_utils import (
     Colors,
-    colorize,
-    pressure_bar,
-    trend_arrow,
-    agent_type_label,
     agent_personality,
     agent_personality_desc,
+    agent_type_label,
+    colorize,
+    pressure_bar,
     sparkline,
+    trend_arrow,
 )
+from .market_env import MarketEnv
+from .run_metadata import RunMetadata, save_run_snapshot
 
 
 class Simulator:
@@ -56,6 +57,7 @@ class Simulator:
         run_id: Optional[str] = None,
         save_snapshot: bool = True,
         runs_dir: str = "runs",
+        player_agent: Optional[Any] = None,
     ) -> List[Dict[str, Any]]:
         """
         Run the simulation for N steps.
@@ -86,6 +88,10 @@ class Simulator:
             Whether to save metadata and run snapshot to disk. Default: True.
         runs_dir : str
             Directory to store run snapshots. Default: "runs".
+        player_agent : PlayerAgent, optional
+            The human player agent. When provided (and ``interactive`` is
+            True), the round menu can queue buy/sell orders for it via
+            ``set_player_action``. Default: None.
 
         Returns
         -------
@@ -114,24 +120,25 @@ class Simulator:
             dirty_str = " (dirty)" if version_info.get("git_dirty") else ""
             ver_str += f" [git:{commit}{dirty_str}]"
 
-        print(f"\n{'='*60}")
-        print(f"  AI Market Sandbox — Simulation Start")
-        print(f"{'='*60}")
-        print(f"  Run ID         : {self.metadata.run_id}")
-        print(f"  Version        : {ver_str}")
-        print(f"  Seed           : {self.metadata.seed}")
-        print(f"  Initial Price  : ${self.env.config.initial_price:.2f}")
-        print(f"  Agents         : {len(self.env.agents)}")
-        print(f"  Steps          : {steps}")
-        print(f"  Output         : {'round-by-round' if round_by_round else 'summary'}")
-        print(f"{'='*60}\n")
+        if verbose:
+            print(f"\n{'='*60}")
+            print("  AI Market Sandbox — Simulation Start")
+            print(f"{'='*60}")
+            print(f"  Run ID         : {self.metadata.run_id}")
+            print(f"  Version        : {ver_str}")
+            print(f"  Seed           : {self.metadata.seed}")
+            print(f"  Initial Price  : ${self.env.config.initial_price:.2f}")
+            print(f"  Agents         : {len(self.env.agents)}")
+            print(f"  Steps          : {steps}")
+            print(f"  Output         : {'round-by-round' if round_by_round else 'summary'}")
+            print(f"{'='*60}\n")
 
-        # Print agent roster with personality info.
-        self._print_agent_roster()
+            # Print agent roster with personality info.
+            self._print_agent_roster()
 
-        if not round_by_round:
-            print(f"{'Step':>5}  {'Price':>10}  {'Volume':>8}  {'Change':>8}")
-            print(f"{'-'*5}  {'-'*10}  {'-'*8}  {'-'*8}")
+            if not round_by_round:
+                print(f"{'Step':>5}  {'Price':>10}  {'Volume':>8}  {'Change':>8}")
+                print(f"{'-'*5}  {'-'*10}  {'-'*8}  {'-'*8}")
 
         prev_price = self.env.price
 
@@ -162,10 +169,10 @@ class Simulator:
 
             prev_price = state["price"]
 
-            # Interactive prompt: let the user continue or stop early.
+            # Interactive prompt: let the user continue, intervene, or stop.
             if interactive and round_by_round and i < steps - 1:
-                stop = self._prompt_continue()
-                if stop:
+                action = self._interactive_menu(player_agent)
+                if action == "stop":
                     print(colorize(
                         f"\n  Simulation stopped early at round {state['step']} "
                         f"of {steps}.",
@@ -189,7 +196,8 @@ class Simulator:
             if verbose:
                 print(f"  Run snapshot saved to: {snapshot_dir}")
 
-        print()
+        if verbose:
+            print()
         return self.state_history
 
     @staticmethod
@@ -214,6 +222,240 @@ class Simulator:
             return True
 
         return choice in ("q", "quit", "stop", "s", "exit")
+
+    def _interactive_menu(self, player_agent: Optional[Any] = None) -> str:
+        """
+        Interactive command menu shown after each round.
+
+        Lets the user advance to the next round, trade as the human player,
+        inject events or tweak parameters (God Mode), inspect social
+        relationships, or stop the run.
+
+        Returns
+        -------
+        action : str
+            "continue" to run the next round, or "stop" to end early.
+        """
+        while True:
+            try:
+                choice = input(
+                    colorize(
+                        "\n  [Enter] next  [b]uy  [s]ell  [e]vent  "
+                        "[p]arams  [r]elations  [h]elp  [q]uit  > ",
+                        Colors.DIM,
+                    )
+                ).strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                # Treat EOF or Ctrl-C as "stop".
+                return "stop"
+
+            if choice == "":
+                return "continue"
+            if choice in ("q", "quit", "stop", "exit"):
+                return "stop"
+            if choice in ("b", "buy"):
+                self._cmd_player_trade(player_agent, "buy")
+            elif choice in ("s", "sell"):
+                self._cmd_player_trade(player_agent, "sell")
+            elif choice in ("e", "event", "god"):
+                self._cmd_god_event()
+            elif choice in ("p", "params", "config", "settings"):
+                self._cmd_god_config()
+            elif choice in ("r", "rel", "relations", "social"):
+                self._show_social()
+            elif choice in ("h", "help", "?"):
+                self._print_menu_help()
+            else:
+                print(colorize(
+                    f"  Unknown command '{choice}'. Type 'h' for help.",
+                    Colors.YELLOW,
+                ))
+            # Loop back to the menu; a subcommand never ends the round.
+
+    def _cmd_player_trade(self, player_agent: Optional[Any], action: str) -> None:
+        """Queue a buy or sell order for the human player."""
+        if player_agent is None:
+            print(colorize("  Player mode is not available for this run.", Colors.YELLOW))
+            return
+
+        color = Colors.GREEN if action == "buy" else Colors.RED
+        verb = action.upper()
+        print(colorize(f"\n  Player trade — {verb}", color))
+        print(
+            f"    Cash: ${player_agent.cash:,.2f}   "
+            f"Holdings: {player_agent.holdings}   "
+            f"Price: ${self.env.price:.2f}"
+        )
+
+        try:
+            raw = input(
+                colorize("  Quantity (or 'c' to cancel): ", Colors.DIM)
+            ).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print(colorize("  Cancelled.", Colors.GRAY))
+            return
+        if raw in ("c", "cancel", ""):
+            print(colorize("  Cancelled.", Colors.GRAY))
+            return
+
+        try:
+            quantity = int(raw)
+        except ValueError:
+            print(colorize("  Invalid quantity. Cancelled.", Colors.YELLOW))
+            return
+        if quantity <= 0:
+            print(colorize("  Quantity must be positive. Cancelled.", Colors.YELLOW))
+            return
+
+        self.env.set_player_action(action, quantity)
+        print(colorize(
+            f"  Queued {verb} {quantity} shares for the next round.", color
+        ))
+
+    def _cmd_god_event(self) -> None:
+        """God Mode: list event templates and force-trigger one."""
+        from .market_events import EVENT_TEMPLATES
+
+        print(colorize("\n  God Mode — Event Library:", Colors.YELLOW))
+        for idx, evt in enumerate(EVENT_TEMPLATES, 1):
+            impact_color = Colors.GREEN if evt.price_impact >= 0 else Colors.RED
+            impact = colorize(f"{evt.price_impact * 100:+.0f}%", impact_color)
+            print(
+                f"    {idx:>2}. {evt.name:<22} [{evt.event_type.value}] "
+                f"price:{impact}  {evt.duration_steps} steps"
+            )
+        print(colorize(
+            "  Enter a number, a template name, or 'c' to cancel.",
+            Colors.DIM,
+        ))
+
+        try:
+            raw = input(colorize("  Trigger event > ", Colors.DIM)).strip()
+        except (EOFError, KeyboardInterrupt):
+            print(colorize("  Cancelled.", Colors.GRAY))
+            return
+        if raw.lower() in ("c", "cancel", ""):
+            print(colorize("  Cancelled.", Colors.GRAY))
+            return
+
+        name = raw
+        if raw.isdigit():
+            idx = int(raw)
+            if 1 <= idx <= len(EVENT_TEMPLATES):
+                name = EVENT_TEMPLATES[idx - 1].name
+            else:
+                print(colorize("  Invalid event number.", Colors.YELLOW))
+                return
+
+        event = self.env.event_manager.force_trigger_event(
+            name=name,
+            step=self.env.step_count,
+        )
+        print(colorize(
+            f"  Injected event '{event.name}': {event.description} "
+            f"(impact {event.price_impact * 100:+.0f}%)",
+            Colors.YELLOW,
+        ))
+
+    def _cmd_god_config(self) -> None:
+        """God Mode: adjust live market parameters."""
+        cfg = self.env.config
+        em = self.env.event_manager
+        drift = getattr(self.env, "_sentiment_drift", 0.0)
+
+        print(colorize("\n  God Mode — Market Parameters:", Colors.YELLOW))
+        print(f"    1. Price sensitivity         : {cfg.price_sensitivity:.4f}")
+        print(f"    2. Max price change / step   : {cfg.max_price_change_ratio:.4f}")
+        print(f"    3. Event probability mult    : {cfg.event_probability_multiplier:.2f}")
+        print(f"    4. Sentiment drift           : {drift:+.3f}")
+        print(colorize("  Enter a number to edit, or 'c' to cancel.", Colors.DIM))
+
+        try:
+            raw = input(colorize("  Edit parameter > ", Colors.DIM)).strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print(colorize("  Cancelled.", Colors.GRAY))
+            return
+        if raw in ("c", "cancel", ""):
+            print(colorize("  Cancelled.", Colors.GRAY))
+            return
+        if raw not in ("1", "2", "3", "4"):
+            print(colorize("  Invalid choice.", Colors.YELLOW))
+            return
+
+        try:
+            value = float(input(colorize("  New value > ", Colors.DIM)).strip())
+        except (EOFError, KeyboardInterrupt):
+            print(colorize("  Cancelled.", Colors.GRAY))
+            return
+        except ValueError:
+            print(colorize("  Invalid number.", Colors.YELLOW))
+            return
+
+        if raw == "1":
+            if value < 0:
+                print(colorize("  Sensitivity must be >= 0.", Colors.YELLOW))
+                return
+            cfg.price_sensitivity = value
+        elif raw == "2":
+            if value <= 0:
+                print(colorize("  Max change must be > 0.", Colors.YELLOW))
+                return
+            cfg.max_price_change_ratio = value
+        elif raw == "3":
+            cfg.event_probability_multiplier = value
+            em.multiplier = value
+        else:  # raw == "4"
+            self.env._sentiment_drift = max(-1.0, min(1.0, value))
+
+        print(colorize("  Parameter updated.", Colors.GREEN))
+
+    def _show_social(self) -> None:
+        """Show each agent's social relationships and personality traits."""
+        from .agents.roster import resolve_social_map
+
+        trait_names = [
+            "panic", "greed", "fomo", "stubbornness",
+            "loss_aversion", "overconfidence", "regret_avoidance",
+        ]
+
+        print(colorize("\n  Social Relationships:", Colors.BOLD))
+        print(f"{'─'*64}")
+        social = resolve_social_map(list(self.env.agents.values()))
+        for agent in self.env.agents.values():
+            aid = agent.agent_id
+            rel = social.get(aid, {"idol": None, "friends": [], "enemies": []})
+            personality = agent_personality(agent) or "none"
+
+            traits = []
+            for t in trait_names:
+                v = getattr(agent, t, None)
+                if v is not None and v > 0:
+                    traits.append(f"{t}={v:.1f}")
+            trait_str = ", ".join(traits) if traits else "no traits"
+
+            idol = rel.get("idol") or "-"
+            friends = ", ".join(rel.get("friends", [])) or "-"
+            enemies = ", ".join(rel.get("enemies", [])) or "-"
+
+            print(f"  {colorize(aid, Colors.BOLD)}  [{personality}]")
+            print(colorize(f"      idol    : {idol}", Colors.DIM))
+            print(colorize(f"      friends : {friends}", Colors.DIM))
+            print(colorize(f"      enemies : {enemies}", Colors.DIM))
+            print(colorize(f"      traits  : {trait_str}", Colors.DIM))
+        print(f"{'─'*64}")
+
+    @staticmethod
+    def _print_menu_help() -> None:
+        """Print the interactive menu help text."""
+        print(colorize("\n  Interactive commands:", Colors.BOLD))
+        print("    Enter / blank   advance to the next round")
+        print("    b / buy         buy shares as the human player")
+        print("    s / sell        sell shares as the human player")
+        print("    e / event       inject a market event (God Mode)")
+        print("    p / params      adjust market parameters (God Mode)")
+        print("    r / relations   view social relationships & traits")
+        print("    h / help        show this help")
+        print("    q / quit        stop and show final results")
 
     # ------------------------------------------------------------------
     # Round-by-round printing
@@ -516,14 +758,14 @@ class Simulator:
         initial_price = env.config.initial_price
 
         print(f"{'='*60}")
-        print(f"  FINAL REPORT")
+        print("  FINAL REPORT")
         print(f"{'='*60}")
         if self.metadata:
             print(f"  Run ID  : {self.metadata.run_id}")
             print(f"  Seed    : {self.metadata.seed}")
 
         # Price summary.
-        print(f"\n  Price Summary:")
+        print("\n  Price Summary:")
         print(f"    Initial : ${initial_price:.2f}")
         print(f"    Final   : ${env.price:.2f}")
         pct = (env.price / initial_price - 1) * 100
@@ -533,7 +775,7 @@ class Simulator:
         # Trade summary.
         buy_trades = [t for t in env.trade_history if t.action == "buy"]
         sell_trades = [t for t in env.trade_history if t.action == "sell"]
-        print(f"\n  Trade Summary:")
+        print("\n  Trade Summary:")
         print(f"    Total Trades : {len(env.trade_history)}")
         print(f"    Buy Orders   : {len(buy_trades)}")
         print(f"    Sell Orders  : {len(sell_trades)}")
@@ -541,8 +783,12 @@ class Simulator:
             print(f"    Avg Volume   : {sum(env.volume_history)/len(env.volume_history):.1f}")
 
         # Agent ranking.
-        print(f"\n  Agent Rankings (by final wealth):")
-        print(f"  {'Rank':>4}  {'Agent':<22}  {'Cash':>10}  {'Holdings':>10}  {'Wealth':>10}  {'Return':>8}")
+        print("\n  Agent Rankings (by final wealth):")
+        header = (
+            f"  {'Rank':>4}  {'Agent':<22}  {'Cash':>10}  {'Holdings':>10}"
+            f"  {'Wealth':>10}  {'Return':>8}"
+        )
+        print(header)
         print(f"  {'-'*4}  {'-'*22}  {'-'*10}  {'-'*10}  {'-'*10}  {'-'*8}")
 
         ranked = sorted(
@@ -576,13 +822,16 @@ class Simulator:
             )
 
         # Performance metrics
-        print(f"\n  Performance Metrics:")
+        print("\n  Performance Metrics:")
         print(f"  {'Agent':<22}  {'Sharpe':>8}  {'MaxDD':>8}  {'Volatility':>10}  {'WinRate':>8}")
         print(f"  {'-'*22}  {'-'*8}  {'-'*8}  {'-'*10}  {'-'*8}")
 
         for agent in ranked:
             m = self._compute_agent_metrics(agent.agent_id)
-            sharpe_color = Colors.GREEN if m['sharpe'] > 0 else (Colors.RED if m['sharpe'] < 0 else "")
+            sharpe_color = (
+                Colors.GREEN if m['sharpe'] > 0
+                else (Colors.RED if m['sharpe'] < 0 else "")
+            )
             dd_color = Colors.RED if m['max_drawdown'] > 0.1 else ""
             sharpe_str = colorize(f"{m['sharpe']:8.2f}", sharpe_color)
             dd_str = colorize(f"{m['max_drawdown']*100:7.2f}%", dd_color)
@@ -623,8 +872,6 @@ class Simulator:
 
     def export_csv(self, filepath: str) -> None:
         """Export trade history to a CSV file."""
-        import csv
-
         with open(filepath, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
             writer.writerow(["step", "agent_id", "action", "quantity", "price", "cash_change"])

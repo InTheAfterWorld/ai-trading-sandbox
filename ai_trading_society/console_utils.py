@@ -74,14 +74,14 @@ def agent_type_label(agent) -> str:
 def agent_personality(agent) -> str:
     """Return the personality name for an agent, or empty string."""
     if hasattr(agent, "personality_name"):
-        return agent.personality_name
+        return str(agent.personality_name)
     return ""
 
 
 def agent_personality_desc(agent) -> str:
     """Return the personality description for an agent, or empty string."""
     if hasattr(agent, "personality_description"):
-        return agent.personality_description
+        return str(agent.personality_description)
     return ""
 
 

@@ -1,6 +1,7 @@
 """Human player agent that reads actions from the MarketEnv buffer."""
 
 from typing import Any, Dict
+
 from ..base_agent import BaseAgent
 
 

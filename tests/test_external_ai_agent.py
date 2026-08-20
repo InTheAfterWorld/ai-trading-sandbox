@@ -41,7 +41,11 @@ class TestResponseParsing:
     def test_parses_json_in_text(self):
         """Should extract JSON embedded in text."""
         agent = ExternalAIAgent.__new__(ExternalAIAgent)
-        response = 'I think we should buy.\n{"action": "buy", "quantity": 30}\nThat is my recommendation.'
+        response = (
+            'I think we should buy.\n'
+            '{"action": "buy", "quantity": 30}\n'
+            'That is my recommendation.'
+        )
         result = agent._parse_response(response)
         assert result["action"] == "buy"
         assert result["quantity"] == 30

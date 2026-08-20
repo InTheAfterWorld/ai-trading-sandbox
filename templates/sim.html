@@ -13,7 +13,7 @@
   --green:#22c55e;--red:#ef4444;--yellow:#eab308;--orange:#f97316;--cyan:#06b6d4;
   --shadow-lg:0 20px 60px rgba(0,0,0,.35);--shadow-sm:0 4px 20px rgba(0,0,0,.25);
   --radius:14px;--radius-lg:18px;--radius-sm:10px;
-}
+}  
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;min-height:100vh;padding-bottom:70px;overflow-x:hidden;}
 /* Animated glow background */
@@ -58,6 +58,12 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-ap
 .btn-danger:hover{background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.6);}
 .btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none;}
 .btn-sm{padding:5px 10px;font-size:11px;}
+.speed-select{
+  background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;
+  padding:5px 8px;color:var(--text);font:600 11px inherit;cursor:pointer;outline:none;
+}
+.speed-select:hover{border-color:var(--purple);}
+.speed-select:focus{border-color:var(--purple);}
 @media(max-width:640px){.top-stat{display:none;}}
 
 /* ---------- Main grid ---------- */
@@ -107,7 +113,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-ap
 .sp-price.pos{color:var(--green);}
 .sp-price.neg{color:var(--red);}
 .sp-change{font-size:14px;font-weight:700;}
-.sp-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;}
+.sp-stats{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:14px;}
 @media(max-width:900px){.sp-stats{grid-template-columns:repeat(2,1fr);}}
 .sp-stat{background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:8px 10px;}
 .sp-label{display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-dim);margin-bottom:3px;font-weight:600;}
@@ -115,7 +121,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-ap
 .sp-val.vol-low{color:var(--green);}
 .sp-val.vol-med{color:var(--yellow);}
 .sp-val.vol-high{color:var(--red);}
-.sp-chart-wrap{position:relative;height:270px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;}
+.sp-chart-wrap{position:relative;height:320px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;}
 .sp-chart-wrap canvas{position:absolute;inset:0;cursor:crosshair;}
 .candle-tip{
   position:absolute;top:8px;left:8px;display:none;pointer-events:none;z-index:5;
@@ -163,6 +169,30 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-ap
   padding:6px 10px;color:var(--text);font-size:12px;width:120px;outline:none;transition:border-color .15s;
 }
 .setting-row input:focus{border-color:var(--purple);}
+/* Range slider: the generic .setting-row input rule above injects padding/
+   border/background that offset the thumb off the 0%–100% track. Reset and
+   draw a custom track/thumb so both ends line up with the container. */
+input[type="range"]{
+  -webkit-appearance:none;appearance:none;
+  width:100%;height:22px;background:transparent;border:none;border-radius:0;
+  padding:0;cursor:pointer;transition:none;
+}
+input[type="range"]::-webkit-slider-runnable-track{
+  height:6px;border-radius:3px;background:var(--border);
+}
+input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+  background:var(--purple);border:2px solid #fff;margin-top:-5px;
+  box-shadow:0 1px 4px rgba(0,0,0,.4);
+}
+input[type="range"]::-moz-range-track{
+  height:6px;border-radius:3px;background:var(--border);
+}
+input[type="range"]::-moz-range-thumb{
+  width:16px;height:16px;border-radius:50%;
+  background:var(--purple);border:2px solid #fff;
+}
+input[type="range"]:focus{outline:none;}
 .event-toggle{
   display:flex;align-items:center;justify-content:space-between;
   margin-bottom:12px;padding:8px 12px;border:1px solid var(--border);
@@ -299,6 +329,12 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
   font-size:11px;padding:2px 4px;border-radius:4px;font-family:inherit;
 }
 .toast-close:hover{color:var(--red);}
+.toast-retry{
+  flex-shrink:0;background:rgba(167,139,250,.15);border:1px solid rgba(167,139,250,.4);
+  color:var(--purple);cursor:pointer;font:600 11px inherit;border-radius:6px;padding:3px 10px;
+  margin-left:4px;font-family:inherit;
+}
+.toast-retry:hover{background:rgba(167,139,250,.25);border-color:var(--purple);}
 .toast.error{border-color:rgba(239,68,68,.5);}
 .toast.error .toast-icon{color:var(--red);}
 .toast.event{border-color:rgba(234,179,8,.5);}
@@ -316,6 +352,13 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
   box-shadow:var(--shadow-lg);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;
 }
 .wait-window.show{opacity:1;transform:translateX(-50%) translateY(0);}
+/* Full-screen transparent click-blocker shown while AI is thinking. */
+.think-overlay{
+  position:fixed;inset:0;z-index:240;display:none;
+  /* transparent but still catches pointer events */
+  background:rgba(11,14,20,0);
+}
+.think-overlay.show{display:block;}
 .ww-title{font-size:13px;font-weight:700;}
 .ww-sub{font-size:11px;color:var(--text-dim);margin-top:2px;}
 .spinner{width:22px;height:22px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--purple);animation:spin .8s linear infinite;flex-shrink:0;}
@@ -451,7 +494,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
 .ar-reasoning.error{color:var(--red);border-left-color:var(--red);font-style:normal;font-weight:600;}
 .ar-personality{font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;display:inline-block;}
 .ar-desc{font-size:11px;color:var(--text-dim);line-height:1.5;margin:6px 0;}
-.ar-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px 14px;font-size:11px;margin:8px 0;}
+.ar-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:4px 14px;font-size:11px;margin:8px 0;}
 .ar-grid .k{color:var(--text-dim);}
 .ar-grid b{color:var(--text);font-weight:600;}
 
@@ -526,6 +569,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
         <div class="sp-stat"><span class="sp-label">Volatility</span><span class="sp-val" id="spVolat">—</span></div>
         <div class="sp-stat"><span class="sp-label">High</span><span class="sp-val" id="spHigh">—</span></div>
         <div class="sp-stat"><span class="sp-label">Low</span><span class="sp-val" id="spLow">—</span></div>
+        <div class="sp-stat"><span class="sp-label">Mkt Cap</span><span class="sp-val" id="spMktCap">—</span></div>
       </div>
       <div class="sp-chart-wrap">
         <canvas id="candleChart"></canvas>
@@ -540,7 +584,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
       </div>
       <div class="thinking-bar" id="thinkingBar" hidden></div>
       <div id="agentCards">
-        <div class="empty-hint">Waiting for agents…</div>
+        <div class="empty-hint" id="agentInitHint">Initializing AI agents…</div>
       </div>
     </div>
   </div>
@@ -567,11 +611,19 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
   <span class="shortcut-hint" id="statusShortcut"><b>Space</b> Next · <b>A</b> Auto · <b>S</b> End · <b>C</b> Chat</span>
   <button class="btn btn-primary btn-sm" id="btnStep" onclick="runStep()">Next Round ▶</button>
   <button class="btn btn-sm" id="btnAuto" onclick="toggleAuto()">▶ Auto</button>
+  <select class="speed-select" id="speedSelect" title="Auto-play speed" onchange="onSpeedChange()">
+    <option value="4000">0.5x</option>
+    <option value="2000" selected>1x</option>
+    <option value="1000">2x</option>
+  </select>
   <button class="btn btn-sm btn-danger" id="btnEnd" onclick="endSim()">⏹ End</button>
 </div>
 
 <!-- Toasts (top-right) -->
 <div class="toast-container" id="toastContainer"></div>
+
+<!-- Transparent overlay shown while AI is thinking (blocks all clicks). -->
+<div class="think-overlay" id="thinkOverlay"></div>
 
 <!-- Small waiting window -->
 <div class="wait-window" id="waitWindow">
@@ -579,6 +631,18 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
   <div>
     <div class="ww-title">AI agents are thinking…</div>
     <div class="ww-sub" id="waitSub">Waiting for responses</div>
+  </div>
+</div>
+
+<!-- Modal: confirm end -->
+<div class="modal-overlay" id="confirmEndModal">
+  <div class="modal-card" style="width:420px;max-width:92vw;">
+    <div class="modal-title">⏹ End Simulation?</div>
+    <div class="modal-body" id="confirmEndBody">This will stop the market and show final results. Any remaining rounds will be skipped.</div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal('confirmEndModal')">Cancel</button>
+      <button class="btn btn-danger" id="confirmEndBtn">End Now</button>
+    </div>
   </div>
 </div>
 
@@ -601,6 +665,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
     <div class="modal-body" id="resultsBody" style="font-size:12px;line-height:1.5;margin-bottom:14px;"></div>
     <div class="modal-actions">
       <button class="btn btn-sm" onclick="closeModal('resultsModal')">Close</button>
+      <button class="btn btn-sm" onclick="restartSim()">↻ Restart</button>
       <button class="btn btn-sm btn-primary" onclick="goHome()">New Simulation</button>
     </div>
   </div>
@@ -652,6 +717,11 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
       <div class="setting-row"><label>Event Probability</label><input type="number" id="cfgEventProb" value="0.3" step="0.05" min="0" max="1"></div>
       <div class="setting-row"><label>Volatility</label><input type="number" id="cfgVolatility" value="0.02" step="0.01" min="0"></div>
       <div class="setting-row"><label>Sentiment Drift</label><input type="number" id="cfgSentiment" value="0" step="0.01" min="-1" max="1"></div>
+      <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:6px;">
+        <label>Social Influence <span id="cfgSocialVal" style="color:var(--purple);font-weight:700;float:right;">0%</span></label>
+        <input type="range" id="cfgSocial" value="0" step="0.05" min="0" max="1" oninput="document.getElementById('cfgSocialVal').textContent=Math.round(this.value*100)+'%'">
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);opacity:.7;line-height:1;margin-top:-2px;"><span>0%</span><span>100%</span></div>
+      </div>
       <button class="btn btn-sm btn-primary" style="margin:12px 0 16px;width:100%;" onclick="saveAdvanced()">Apply Changes ✓</button>
       <div style="border-top:1px solid var(--border);padding-top:12px;">
         <div style="font-size:11px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">📚 Event Library — Click to Trigger</div>
@@ -664,7 +734,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
 <script>
 let sim={
   running:false,busy:false,thinking:false,round:0,total:0,agents:{},priceHistory:[],
-  autoTimer:null,agentColors:{},timelineItems:[],expandedAgent:null,socialData:null,
+  autoTimer:null,autoInterval:2000,agentColors:{},timelineItems:[],expandedAgent:null,socialData:null,
   selectedStock:'Stock 1',initialPrice:100,lastVolume:null,prevActions:{},
 };
 
@@ -691,7 +761,33 @@ function getApiKey(){
   return String(trader.api_key||trader.apiKey||'').trim();
 }
 function goHome(){if(sim.autoTimer){clearInterval(sim.autoTimer);sim.autoTimer=null;}window.location.href='/';}
+/* Re-run the simulation with the same saved config (no need to go home). */
+function restartSim(){
+  closeModal('resultsModal');
+  if(sim.autoTimer){clearInterval(sim.autoTimer);sim.autoTimer=null;}
+  sim.busy=false;sim.thinking=false;
+  // Reset the button labels that may have been changed by Auto/Pause.
+  document.getElementById('btnAuto').textContent='▶ Auto';
+  disableStepButtons(false);
+  // Clear the price chart canvas so the new run doesn't overlay the old one.
+  const canvas=document.getElementById('candleChart');
+  if(canvas){const ctx=canvas.getContext('2d');ctx&&ctx.clearRect(0,0,canvas.width,canvas.height);}
+  startSim();
+}
 function endSim(){
+  // Destructive action: ask for confirmation first.
+  const remaining=Math.max(0,sim.total-sim.round);
+  const body=document.getElementById('confirmEndBody');
+  body.innerHTML=remaining>0
+    ? `This will stop the market and show final results. <b>${remaining} round${remaining>1?'s':''}</b> will be skipped.`
+    : 'This will stop the market and show final results.';
+  document.getElementById('confirmEndBtn').onclick=()=>{
+    closeModal('confirmEndModal');
+    _doEndSim();
+  };
+  document.getElementById('confirmEndModal').classList.add('show');
+}
+function _doEndSim(){
   if(sim.autoTimer){clearInterval(sim.autoTimer);sim.autoTimer=null;}
   sim.running=false;
   disableStepButtons(true);
@@ -724,6 +820,7 @@ function showToast(msg,type='info',opts={}){
   return dismiss;
 }
 function showError(msg){showToast(msg,'error');}
+function toastContainer(){return document.getElementById('toastContainer');}
 
 /* ---- Thinking / waiting states ---- */
 function setThinking(on){
@@ -733,9 +830,17 @@ function setThinking(on){
   document.getElementById('agentsThinking').hidden=!on;
   document.getElementById('thinkingBar').hidden=!on;
   document.getElementById('agentsCard').classList.toggle('agents-thinking',on);
+  // Block all controls while AI is thinking — not just Next Round.
+  ['btnStep','btnAuto','btnEnd','speedSelect'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.disabled=on;
+  });
   const btn=document.getElementById('btnStep');
   btn.disabled=on||!sim.running;
   btn.innerHTML=on?'<span class="btn-spinner"></span> Thinking…':'Next Round ▶';
+  // A full-screen transparent overlay prevents clicks anywhere else.
+  const ov=document.getElementById('thinkOverlay');
+  if(ov)ov.classList.toggle('show',on);
 }
 
 /* ---- Start ---- */
@@ -749,9 +854,10 @@ async function startSim(opts){
   const hold=parseFloat(cfg.hold||20);
   const fee=parseFloat(cfg.fee||0.001);
   const slip=parseFloat(cfg.slip||0.001);
+  const socialInfluence=parseFloat(cfg.social_influence||0);
 
   try{
-    const resp=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({steps,api_key:apiKey,traders,price,cash,hold,fee,slip,...(opts||{})})});
+    const resp=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({steps,api_key:apiKey,traders,price,cash,hold,fee,slip,social_influence:socialInfluence,...(opts||{})})});
     const data=await resp.json();
     if(data.error){showError(data.error);return;}
 
@@ -772,6 +878,9 @@ async function startSim(opts){
     (data.roster||[]).forEach(a=>{sim.agents[a.id]={...a,return_pct:0,action:'—',requested:0,filled:0};});
     const colors=['#a78bfa','#60a5fa','#22c55e','#eab308','#ef4444','#f97316','#06b6d4','#ec4899'];
     Object.keys(sim.agents).forEach((id,i)=>{sim.agentColors[id]=colors[i%colors.length];});
+    // Clear the "Initializing AI agents…" hint now that the roster is ready.
+    const initHint=document.getElementById('agentInitHint');
+    if(initHint)initHint.textContent='Preparing first round…';
 
     renderRankingFromAgents(data.roster);
     renderAgents(Object.values(sim.agents));
@@ -799,7 +908,7 @@ async function runStep(){
 
     sim.round=data.step||sim.round+1;
     sim.lastVolume=data.volume||0;
-    sim.priceHistory.push({round:sim.round,price:data.price});
+    sim.priceHistory.push({round:sim.round,price:data.price,volume:data.volume||0});
 
     if(data.agents){
       data.agents.forEach(a=>{
@@ -815,7 +924,17 @@ async function runStep(){
     (data.agents||[]).forEach(a=>{
       if(a.error){
         const reason=String(a.reasoning||'').replace(/^AI acquisition failed:\s*/,'').slice(0,110);
-        showToast(`${a.id}: AI fetch failed${reason?' — '+reason:''}`,'error');
+        const msg=`${a.id}: AI fetch failed${reason?' — '+reason:''}`;
+        const dismiss=showToast(msg,'error',{sticky:true});
+        // Append a Retry button to the toast: clicking it dismisses the toast
+        // and re-runs one round so the failed agent gets another chance.
+        const t=toastContainer().lastChild;
+        if(t){
+          const btn=document.createElement('button');
+          btn.className='toast-retry';btn.textContent='Retry';
+          btn.onclick=()=>{dismiss();if(sim.running&&!sim.busy)runStep();};
+          t.appendChild(btn);
+        }
       }
     });
 
@@ -854,8 +973,17 @@ function toggleAuto(){
     clearInterval(sim.autoTimer);sim.autoTimer=null;
     document.getElementById('btnAuto').textContent='▶ Auto';
   }else{
-    sim.autoTimer=setInterval(()=>runStep(),2000);
+    sim.autoTimer=setInterval(()=>runStep(),sim.autoInterval);
     document.getElementById('btnAuto').textContent='⏸ Pause';
+  }
+}
+function onSpeedChange(){
+  const sel=document.getElementById('speedSelect');
+  sim.autoInterval=parseInt(sel.value,10)||2000;
+  // If auto is running, restart the timer with the new interval.
+  if(sim.autoTimer){
+    clearInterval(sim.autoTimer);
+    sim.autoTimer=setInterval(()=>runStep(),sim.autoInterval);
   }
 }
 
@@ -871,7 +999,7 @@ function renderRankingFromAgents(agents){
     return `<div class="rank-row">
       <span class="rank-num">${i+1}</span>
       <span class="agent-dot" style="background:${sim.agentColors[a.id]||'#888'};color:${sim.agentColors[a.id]||'#888'};"></span>
-      <span class="rank-name">${a.id}</span>
+      <span class="rank-name">${escapeHtml(a.id)}</span>
       <span class="rank-wealth">$${(a.wealth||0).toFixed(0)}</span>
       <span class="rank-ret ${retCls}">${retStr}%</span>
     </div>`;
@@ -959,10 +1087,10 @@ function agentRowHtml(a,flash){
     </div>`;
   }
 
-  return `<div class="agent-row${expanded?' expanded':''}${flash?' flash':''}" data-agent="${a.id}" onclick="toggleAgentRow('${a.id}')">
+  return `<div class="agent-row${expanded?' expanded':''}${flash?' flash':''}" data-agent="${escapeHtml(a.id)}" onclick="toggleAgentRow(this.dataset.agent)">
     <div class="ar-main">
       <span class="agent-dot" style="background:${color};color:${color};"></span>
-      <span class="ar-name">${a.id}</span>
+      <span class="ar-name">${escapeHtml(a.id)}</span>
       <span class="ar-type">${pshort}</span>
       <span class="ar-action ${actionCls}">${action}</span>
       <span class="ar-wealth">$${(a.wealth||0).toFixed(0)}</span>
@@ -1065,6 +1193,12 @@ function updateStockPanel(){
     document.getElementById('spHigh').textContent='—';
     document.getElementById('spLow').textContent='—';
   }
+
+  // Market cap = current price × total outstanding shares.
+  const totalShares=Object.values(sim.agents).reduce((s,a)=>s+(a.holdings||0),0);
+  document.getElementById('spMktCap').textContent=
+    totalShares>0?'$'+(cur*totalShares).toLocaleString(undefined,{maximumFractionDigits:0}):'—';
+
   drawCandles();
 }
 
@@ -1095,6 +1229,7 @@ function drawCandles(){
   candleGeom=null;
 
   const prices=sim.priceHistory.map(p=>p.price);
+  const vols=sim.priceHistory.map(p=>p.volume||0);
   if(prices.length<2){
     ctx.fillStyle='#7c8aa5';
     ctx.font='12px Segoe UI,system-ui,sans-serif';
@@ -1103,15 +1238,23 @@ function drawCandles(){
     return;
   }
 
-  const padL=10,padR=56,padT=12,padB=20;
-  const cw=w-padL-padR,ch=h-padT-padB;
+  // Layout: price area on top, volume sub-chart at the bottom.
+  const padL=10,padR=56,padT=10,padB=20;
+  const volH=40,gap=8;
+  const cw=w-padL-padR;
+  const priceTop=padT;
+  const priceBottom=h-padB-volH-gap;
+  const priceCh=priceBottom-priceTop;
+  const volTop=priceBottom+gap;
+  const volBottom=h-padB;
+  const volCh=volBottom-volTop;
   let min=Infinity,max=-Infinity;
   prices.forEach(p=>{if(p<min)min=p;if(p>max)max=p;});
   const range=(max-min)||(Math.abs(max)*0.01)||1;
   const lo=min-range*0.08,hi=max+range*0.08;
-  const Y=p=>padT+ch-((p-lo)/(hi-lo))*ch;
+  const Y=p=>priceTop+priceCh-((p-lo)/(hi-lo))*priceCh;
 
-  // Grid + price axis labels
+  // Grid + price axis labels (price area only)
   ctx.font='10px Segoe UI,system-ui,sans-serif';
   ctx.textAlign='left';
   for(let i=0;i<=4;i++){
@@ -1143,8 +1286,55 @@ function drawCandles(){
     // Body
     ctx.fillStyle=color;
     ctx.fillRect(x-bw/2,top,bw,hgt);
-    rects.push({x0:padL+slot*(i-1),x1:padL+slot*i,round:sim.priceHistory[i].round,o,c,up});
+    rects.push({x0:padL+slot*(i-1),x1:padL+slot*i,round:sim.priceHistory[i].round,o,c,up,volume:vols[i]||0});
   }
+
+  // Moving average line (5-period MA of close prices) overlaid on candles.
+  const maPeriod=5;
+  if(prices.length>=maPeriod){
+    const maPts=[];
+    for(let i=maPeriod-1;i<prices.length;i++){
+      let s=0;
+      for(let j=0;j<maPeriod;j++)s+=prices[i-j];
+      maPts.push({x:padL+slot*(i-1)+slot/2,y:Y(s/maPeriod)});
+    }
+    if(maPts.length>1){
+      ctx.strokeStyle='rgba(96,165,250,.95)';
+      ctx.lineWidth=1.8;
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(maPts[0].x,maPts[0].y);
+      for(let i=1;i<maPts.length;i++)ctx.lineTo(maPts[i].x,maPts[i].y);
+      ctx.stroke();
+      // Legend dot
+      ctx.fillStyle='rgba(96,165,250,.95)';
+      ctx.beginPath();ctx.arc(padL+8,priceTop+8,3,0,Math.PI*2);ctx.fill();
+      ctx.fillStyle='#64748b';
+      ctx.font='9px Segoe UI,system-ui,sans-serif';
+      ctx.textAlign='left';
+      ctx.fillText('MA5',padL+15,priceTop+11);
+    }
+  }
+
+  // Volume bars (bottom sub-chart), colored by candle direction.
+  const maxVol=Math.max(1,...vols.slice(1));
+  const volBw=Math.max(2,Math.min(16,Math.floor(slot*0.62)));
+  for(let i=1;i<prices.length;i++){
+    const v=vols[i]||0;
+    if(v<=0)continue;
+    const bh=Math.max(1,(v/maxVol)*volCh);
+    const up=prices[i]>=prices[i-1];
+    const color=up?'rgba(34,197,94,.55)':'rgba(239,68,68,.55)';
+    const x=padL+slot*(i-1)+slot/2;
+    ctx.fillStyle=color;
+    ctx.fillRect(x-volBw/2,volBottom-bh,volBw,bh);
+  }
+  // Volume axis label
+  ctx.fillStyle='#64748b';
+  ctx.font='9px Segoe UI,system-ui,sans-serif';
+  ctx.textAlign='left';
+  ctx.fillText('Vol',padL+2,volTop+9);
+  ctx.fillText(String(maxVol.toFixed(0)),w-padR+8,volTop+9);
 
   // Last price dashed line + tag
   const last=prices[prices.length-1];
@@ -1165,7 +1355,7 @@ function drawCandles(){
   ctx.textAlign='center';
   ctx.fillText(tag,w-padR+3+tw/2,ly+3.5);
 
-  // Round labels on x axis
+  // Round labels on x axis (below the volume sub-chart)
   ctx.fillStyle='#64748b';
   ctx.font='10px Segoe UI,system-ui,sans-serif';
   ctx.textAlign='center';
@@ -1174,7 +1364,7 @@ function drawCandles(){
     const r=sim.priceHistory[i].round;
     if(r%stepLbl!==0)continue;
     const x=padL+slot*(i-1)+slot/2;
-    ctx.fillText(r,x,h-6);
+    ctx.fillText(r,x,h-5);
   }
 
   candleGeom={rects};
@@ -1192,6 +1382,7 @@ function bindCandleHover(){
     if(!c){tip.style.display='none';return;}
     const chg=c.o>0?((c.c-c.o)/c.o)*100:0;
     tip.innerHTML=`<b>Round ${c.round}</b><br>O $${c.o.toFixed(2)} · C $${c.c.toFixed(2)}<br>`+
+      `Vol: ${(c.volume||0).toLocaleString()}<br>`+
       `<span class="${c.up?'pos':'neg'}">${c.up?'▲':'▼'} ${chg>=0?'+':''}${chg.toFixed(2)}%</span>`;
     tip.style.display='block';
     const wrap=canvas.parentElement;
@@ -1251,7 +1442,7 @@ function renderFeed(){
       <div class="timeline-icon ${it.type}">${icon}</div>
       <div class="timeline-content">
         <div class="timeline-round">Round ${it.round}</div>
-        <div>${it.text}</div>
+        <div>${escapeHtml(it.text)}</div>
       </div>
     </div>`;
   }).join('');
@@ -1302,6 +1493,14 @@ async function showResults(){
     html+='<div style="position:relative;height:120px;"><canvas id="finalChart"></canvas></div>';
     html+='</div>';
 
+    // Wealth comparison chart (multi-agent wealth curves from wealth_history).
+    if(data.wealth_history&&Object.keys(data.wealth_history).length>0){
+      html+='<div style="margin-bottom:10px;">';
+      html+='<div style="font-size:12px;font-weight:700;margin-bottom:6px;">💰 Wealth Comparison</div>';
+      html+='<div style="position:relative;height:160px;"><canvas id="wealthChart"></canvas></div>';
+      html+='</div>';
+    }
+
     html+='<div style="margin-bottom:10px;">';
     html+='<div style="font-size:12px;font-weight:700;margin-bottom:6px;">📈 Market Overview</div>';
     html+='<div class="results-grid" style="gap:6px;">';
@@ -1331,7 +1530,7 @@ async function showResults(){
         const retStr=ret>=0?'+'+ret.toFixed(2):ret.toFixed(2);
         html+=`<tr>
           <td style="font-weight:700;padding:4px 6px;">${r.rank}</td>
-          <td style="padding:4px 6px;"><span class="agent-dot" style="background:${sim.agentColors[r.id]||'#888'};color:${sim.agentColors[r.id]||'#888'};display:inline-block;margin-right:4px;"></span>${r.id}</td>
+          <td style="padding:4px 6px;"><span class="agent-dot" style="background:${sim.agentColors[r.id]||'#888'};color:${sim.agentColors[r.id]||'#888'};display:inline-block;margin-right:4px;"></span>${escapeHtml(r.id)}</td>
           <td class="num" style="padding:4px 6px;">$${(r.wealth||0).toFixed(0)}</td>
           <td class="num ${retCls}" style="padding:4px 6px;">${retStr}%</td>
           <td class="num muted" style="padding:4px 6px;">${(r.sharpe||0).toFixed(2)}</td>
@@ -1374,12 +1573,60 @@ async function showResults(){
         }
       });
     }
+
+    // Draw multi-agent wealth comparison chart.
+    const wealthCtx=document.getElementById('wealthChart');
+    if(wealthCtx&&data.wealth_history){
+      const wh=data.wealth_history;
+      const agentIds=Object.keys(wh);
+      if(agentIds.length>0){
+        // Build a shared step axis from the longest series.
+        const maxLen=Math.max(...agentIds.map(id=>(wh[id]||[]).length));
+        const labels=Array.from({length:maxLen},(_,i)=>i);
+        const palette=['#a78bfa','#60a5fa','#22c55e','#eab308','#ef4444','#f97316','#06b6d4','#ec4899'];
+        const datasets=agentIds.map((id,i)=>({
+          label:id,
+          data:(wh[id]||[]).map(p=>p.wealth),
+          borderColor:palette[i%palette.length],
+          backgroundColor:'transparent',
+          borderWidth:2,
+          pointRadius:0,
+          tension:.3,
+        }));
+        new Chart(wealthCtx.getContext('2d'),{
+          type:'line',
+          data:{labels,datasets},
+          options:{
+            responsive:true,maintainAspectRatio:false,
+            plugins:{
+              legend:{display:true,position:'bottom',labels:{color:'#7c8aa5',font:{size:10},boxWidth:10,boxHeight:10}},
+              tooltip:{backgroundColor:'#1d2335',borderColor:'#3a4a6b',borderWidth:1,titleColor:'#e2e8f0',bodyColor:'#7c8aa5'}
+            },
+            scales:{
+              x:{grid:{color:'rgba(42,50,69,.5)'},ticks:{color:'#64748b',font:{size:10}}},
+              y:{grid:{color:'rgba(42,50,69,.5)'},ticks:{color:'#64748b',font:{size:10},callback:v=>'$'+Number(v).toFixed(0)}}
+            },
+            interaction:{mode:'index',intersect:false}
+          }
+        });
+      }
+    }
   }catch(err){showError('Failed to load results: '+err.message);}
 }
 
 /* ---- Settings drawer ---- */
 function openSettingsPanel(){
   document.getElementById('settingsOverlay').classList.add('show');
+  loadLiveConfig();
+}
+
+/* Load the startup social-influence value into the settings slider.
+   The Apply Changes button pushes any new value live via /api/god/config. */
+function loadLiveConfig(){
+  const cfg=loadConfig();
+  const s=parseFloat(cfg.social_influence||0);
+  document.getElementById('cfgSocial').value=s;
+  document.getElementById('cfgSocialVal').textContent=Math.round(s*100)+'%';
 }
 
 function closeSettingsPanel(){
@@ -1405,12 +1652,18 @@ function eventMultiplier(){
 async function saveAdvanced(){
   const vol=parseFloat(document.getElementById('cfgVolatility').value);
   const sent=parseFloat(document.getElementById('cfgSentiment').value);
+  const social=parseFloat(document.getElementById('cfgSocial').value);
   const cfg={
     event_multiplier:eventMultiplier(),
     price_sensitivity:isNaN(vol)?0.02:Math.max(vol,0),
     sentiment_drift:isNaN(sent)?0:Math.min(Math.max(sent,-1),1),
+    social_influence:isNaN(social)?0:Math.min(Math.max(social,0),1),
   };
-  await fetch('/api/god/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+  try{
+    const resp=await fetch('/api/god/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
+    if(resp.ok)showToast('Settings applied ✓','success');
+    else{const d=await resp.json().catch(()=>({}));showToast('Settings failed: '+(d.error||resp.status),'error');}
+  }catch(e){showToast('Settings failed: '+e.message,'error');}
 }
 
 function toggleRandomEvents(){
@@ -1481,7 +1734,7 @@ function disableStepButtons(disabled){
 
 function closeModal(id){document.getElementById(id).classList.remove('show');}
 
-function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 
 /* ---- Agent social data (feeds the expandable row details) ---- */
 async function loadSocialData(){
@@ -1508,7 +1761,7 @@ function openChatPanel(focusInput){
   const targets=chatTargets();
   const hasCur=targets.some(a=>a.id===chatState.target);
   if(sel.options.length!==targets.length||!hasCur){
-    sel.innerHTML=targets.map(a=>`<option value="${a.id}">${a.id}</option>`).join('');
+    sel.innerHTML=targets.map(a=>`<option value="${escapeHtml(a.id)}">${escapeHtml(a.id)}</option>`).join('');
     chatState.target=targets.length>0?targets[0].id:'';
     sel.value=chatState.target;
   }
@@ -1531,8 +1784,8 @@ function renderChatMessages(){
   if(msgs.length===0){el.innerHTML='<div class="chat-empty">Pick an agent and say hello…</div>';return;}
   el.innerHTML=msgs.map(m=>{
     if(m.role==='user')return `<div class="chat-msg user">${escapeHtml(m.text)}</div>`;
-    if(m.role==='typing')return `<div class="chat-msg agent typing">${chatState.target} is thinking…</div>`;
-    return `<div class="chat-msg agent"><div class="cm-name">${chatState.target}</div>${escapeHtml(m.text)}${m.fallback?'<div style="font-size:9.5px;color:var(--text-dim);margin-top:4px;">offline persona reply — no live AI response</div>':''}</div>`;
+    if(m.role==='typing')return `<div class="chat-msg agent typing">${escapeHtml(chatState.target)} is thinking…</div>`;
+    return `<div class="chat-msg agent"><div class="cm-name">${escapeHtml(chatState.target)}</div>${escapeHtml(m.text)}${m.fallback?'<div style="font-size:9.5px;color:var(--text-dim);margin-top:4px;">offline persona reply — no live AI response</div>':''}</div>`;
   }).join('');
   el.scrollTop=el.scrollHeight;
 }

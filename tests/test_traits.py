@@ -1,9 +1,8 @@
 """Tests for TraitAgent: state sync, regret avoidance, and other traits."""
 
-import pytest
 
-from tests.conftest import ScriptedExternalAIAgent
 from ai_trading_society.agents.traits import TraitAgent, create_personality_agent
+from tests.conftest import ScriptedExternalAIAgent
 
 
 class TestStateSync:
@@ -28,11 +27,15 @@ class TestStateSync:
         from ai_trading_society.config import MarketConfig
         from ai_trading_society.market_env import MarketEnv
 
-        base = ScriptedExternalAIAgent("trader", cash=10000, holdings=0, buy_prob=1.0, sell_prob=0.0)
+        base = ScriptedExternalAIAgent(
+            "trader", cash=10000, holdings=0, buy_prob=1.0, sell_prob=0.0
+        )
         trait = TraitAgent(base)
 
         config = MarketConfig(initial_price=100.0)
-        seller = ScriptedExternalAIAgent("seller", cash=0, holdings=100, buy_prob=0.0, sell_prob=1.0)
+        seller = ScriptedExternalAIAgent(
+            "seller", cash=0, holdings=100, buy_prob=0.0, sell_prob=1.0
+        )
         env = MarketEnv(config, [trait, seller])
         env.step()
 
@@ -46,7 +49,9 @@ class TestRegretAvoidance:
 
     def test_uses_actual_initial_wealth(self):
         """Agent with 50000 initial should use 50000 as threshold, not 10000."""
-        base = ScriptedExternalAIAgent("rich", cash=50000, holdings=100, buy_prob=0.0, sell_prob=1.0)
+        base = ScriptedExternalAIAgent(
+            "rich", cash=50000, holdings=100, buy_prob=0.0, sell_prob=1.0
+        )
         trait = TraitAgent(base, regret_avoidance=1.0)
 
         # First act to capture initial wealth
@@ -79,7 +84,9 @@ class TestRegretAvoidance:
 
     def test_does_not_trigger_when_wealth_above_threshold(self):
         """Agent with high wealth should still be able to sell."""
-        base = ScriptedExternalAIAgent("rich", cash=50000, holdings=100, buy_prob=0.0, sell_prob=1.0)
+        base = ScriptedExternalAIAgent(
+            "rich", cash=50000, holdings=100, buy_prob=0.0, sell_prob=1.0
+        )
         trait = TraitAgent(base, regret_avoidance=1.0)
 
         obs1 = {
@@ -113,7 +120,9 @@ class TestPanic:
 
     def test_panic_sells_on_drawdown(self):
         """Panic trait should trigger sell on significant drawdown."""
-        base = ScriptedExternalAIAgent("panicker", cash=0, holdings=100, buy_prob=0.0, sell_prob=0.0)
+        base = ScriptedExternalAIAgent(
+            "panicker", cash=0, holdings=100, buy_prob=0.0, sell_prob=0.0
+        )
         trait = TraitAgent(base, panic=1.0)
 
         # First act: establish peak wealth

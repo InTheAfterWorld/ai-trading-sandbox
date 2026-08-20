@@ -1,22 +1,11 @@
-# Core: no external dependencies required for basic simulation.
+# Core simulation: no external dependencies.
 
-# Optional: visualization (charts and graphs)
-matplotlib>=3.7
-
-# Optional: scenario config files (YAML)
-pyyaml>=6.0
-
-# Optional: external AI agents
-openai>=1.0
-anthropic>=0.18
-google-generativeai>=0.3
-python-dotenv>=1.0
-
-# Optional: web UI dashboard
+# Web dashboard (python run.py) - the default entry point.
 flask>=3.0
 
-# Optional: development
-pytest>=7.0
-pytest-cov>=4.0
-ruff>=0.1
-mypy>=1.0
+# Optional extras are declared in pyproject.toml:
+#   pip install -e ".[viz]"   # matplotlib charts
+#   pip install -e ".[config]"  # YAML scenario configs
+#   pip install -e ".[ai]"    # OpenAI / Anthropic / Gemini SDKs
+#   pip install -e ".[dev]"   # pytest, ruff, mypy
+#   pip install -e ".[all]"   # everything

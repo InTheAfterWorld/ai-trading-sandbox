@@ -64,6 +64,31 @@ def _normalize_traders(traders: Any) -> list:
     return out
 
 
+_INT_KEYS = ("steps", "hold")
+_FLOAT_KEYS = ("price", "cash", "fee", "slip")
+_STR_KEYS = ("provider", "model")
+
+
+def _apply_scalar_fields(cfg: Dict[str, Any], data: Dict[str, Any]) -> None:
+    """Copy scalar config fields into ``cfg``, type-checking numeric values.
+
+    Numeric fields keep their default whenever the stored value is not a real
+    number (e.g. a hand-edited ``"steps": "abc"``), so the CLI cannot crash on
+    ``range("abc")``. Bool is rejected too, matching the web API's behavior.
+    """
+    for key in _STR_KEYS:
+        if key in data:
+            cfg[key] = data[key]
+    for key in _INT_KEYS:
+        val = data.get(key)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            cfg[key] = int(val)
+    for key in _FLOAT_KEYS:
+        val = data.get(key)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            cfg[key] = float(val)
+
+
 def load_config(path: Optional[str] = None) -> Dict[str, Any]:
     """
     Load the saved user configuration, falling back to defaults on any error.
@@ -85,9 +110,7 @@ def load_config(path: Optional[str] = None) -> Dict[str, Any]:
             data = json.load(f)
         if not isinstance(data, dict):
             return cfg
-        for key in ("steps", "price", "cash", "hold", "fee", "slip", "provider", "model"):
-            if key in data:
-                cfg[key] = data[key]
+        _apply_scalar_fields(cfg, data)
         cfg["traders"] = _normalize_traders(data.get("traders"))
     except (OSError, ValueError):
         pass
@@ -111,9 +134,7 @@ def save_config(data: Dict[str, Any], path: Optional[str] = None) -> Dict[str, A
         The normalized configuration that was written.
     """
     cfg = dict(DEFAULT_CONFIG)
-    for key in ("steps", "price", "cash", "hold", "fee", "slip", "provider", "model"):
-        if key in data:
-            cfg[key] = data[key]
+    _apply_scalar_fields(cfg, data)
     cfg["traders"] = _normalize_traders(data.get("traders", cfg["traders"]))
 
     cfg_path = Path(path) if path else Path(CONFIG_PATH)

@@ -1,6 +1,5 @@
 """Tests for MarketEnv: price updates, order matching, transaction costs."""
 
-import pytest
 
 from ai_trading_society.config import MarketConfig
 from ai_trading_society.market_env import MarketEnv
@@ -40,8 +39,12 @@ class TestPriceUpdates:
             max_price_change_ratio=0.06,
         )
         agents = [
-            ScriptedExternalAIAgent("buyer", cash=1_000_000, holdings=0, buy_prob=1.0, sell_prob=0.0),
-            ScriptedExternalAIAgent("seller", cash=0, holdings=1, buy_prob=0.0, sell_prob=1.0),
+            ScriptedExternalAIAgent(
+                "buyer", cash=1_000_000, holdings=0, buy_prob=1.0, sell_prob=0.0
+            ),
+            ScriptedExternalAIAgent(
+                "seller", cash=0, holdings=1, buy_prob=0.0, sell_prob=1.0
+            ),
         ]
         env = MarketEnv(config, agents)
         initial_price = env.price

@@ -1,17 +1,17 @@
 """Tests for console output utilities."""
 
-from ai_trading_society.console_utils import (
-    Colors,
-    colorize,
-    trend_arrow,
-    pressure_bar,
-    agent_type_label,
-    agent_personality,
-    agent_personality_desc,
-    sparkline,
-)
 from ai_trading_society.agents.external_ai_agent import ExternalAIAgent
 from ai_trading_society.agents.traits import TraitAgent
+from ai_trading_society.console_utils import (
+    Colors,
+    agent_personality,
+    agent_personality_desc,
+    agent_type_label,
+    colorize,
+    pressure_bar,
+    sparkline,
+    trend_arrow,
+)
 
 
 class TestColorize:

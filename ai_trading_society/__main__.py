@@ -10,11 +10,11 @@ identically from the terminal. Optional flags override individual fields.
 
 from typing import Optional
 
+from .agents.roster import DEFAULT_AI_MODELS, build_agent_roster
 from .config import MarketConfig
+from .config_store import load_config
 from .market_env import MarketEnv
 from .simulator import Simulator
-from .config_store import load_config
-from .agents.roster import build_agent_roster, DEFAULT_AI_MODELS
 
 # Re-export AI_MODELS for backwards compatibility
 AI_MODELS = DEFAULT_AI_MODELS
@@ -51,7 +51,7 @@ def run_society_mode(
         slippage_rate=float(cfg.get("slip", 0.001)),
     )
 
-    agents, _ = build_agent_roster(
+    agents, player_agent = build_agent_roster(
         provider=provider,
         model=model,
         api_key=api_key,
@@ -60,6 +60,9 @@ def run_society_mode(
         holdings=int(cfg.get("hold", 20)),
     )
     env = MarketEnv(config, agents, seed=seed)
+    # Wire the player agent to the environment so its buffered orders are
+    # read during order collection (same mechanism as the web dashboard).
+    player_agent._env = env
     sim = Simulator(env)
 
     sim.run(
@@ -68,6 +71,7 @@ def run_society_mode(
         round_by_round=True,
         interactive=interactive,
         seed=seed,
+        player_agent=player_agent,
     )
     sim.report(generate_charts=True, chart_output_dir="charts")
 
@@ -88,6 +92,9 @@ def main(
     print()
     print("Config is shared with the homepage (user_config.json). Pass --provider, ")
     print("--model, or --api-key to override what was saved in the browser.")
+    print()
+    print("In interactive mode you can also trade as the player, inject market")
+    print("events, tweak market parameters (God Mode), and inspect social ties.")
     print()
 
     # Ask whether to run in interactive (step-by-step) mode.

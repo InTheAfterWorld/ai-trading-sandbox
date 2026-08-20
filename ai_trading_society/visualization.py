@@ -5,13 +5,13 @@ Generates charts: price history with event markers, wealth timeline,
 and final rankings bar chart.
 """
 
+import os
 from typing import Any, Dict, List, Optional
 
 
 def _check_matplotlib():
     """Check if matplotlib is available."""
     try:
-        import matplotlib.pyplot as plt
         import matplotlib
         matplotlib.use('Agg')
         return True
@@ -48,8 +48,8 @@ def plot_price_history(
         print("Warning: matplotlib not installed. Skipping visualization.")
         return None
 
-    import matplotlib.pyplot as plt
     import matplotlib
+    import matplotlib.pyplot as plt
     matplotlib.use('Agg')
 
     fig, ax = plt.subplots(figsize=(12, 6))
@@ -117,8 +117,8 @@ def plot_wealth_timeline(
         print("Warning: matplotlib not installed. Skipping visualization.")
         return None
 
-    import matplotlib.pyplot as plt
     import matplotlib
+    import matplotlib.pyplot as plt
     matplotlib.use('Agg')
 
     if not state_history:
@@ -196,8 +196,8 @@ def plot_final_rankings(
         print("Warning: matplotlib not installed. Skipping visualization.")
         return None
 
-    import matplotlib.pyplot as plt
     import matplotlib
+    import matplotlib.pyplot as plt
     matplotlib.use('Agg')
 
     agents_data = final_state.get("agents", {})
@@ -289,8 +289,6 @@ def generate_all_charts(
     figures : dict
         Dictionary of figure objects (None if saved to file).
     """
-    import os
-
     return {
         "price": plot_price_history(
             price_history,

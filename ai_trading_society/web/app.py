@@ -16,31 +16,33 @@ import uuid
 from collections import OrderedDict
 
 try:
-    from flask import Flask, render_template, jsonify, request, session as flask_session
+    from flask import Flask, jsonify, render_template, request
+    from flask import session as flask_session
 except ImportError:
     print("Flask is not installed. Install it with:")
     print("    pip install flask")
     sys.exit(1)
 
+from ai_trading_society.agents.external_ai_agent import (
+    _DEFAULT_MODELS,
+    ExternalAIAgent,
+)
+from ai_trading_society.agents.roster import build_agent_roster, resolve_social_map
 from ai_trading_society.config import MarketConfig
 from ai_trading_society.config_store import load_config, save_config
-from ai_trading_society.agents.roster import build_agent_roster, resolve_social_map
-from ai_trading_society.agents.external_ai_agent import (
-    ExternalAIAgent,
-    _DEFAULT_MODELS,
-)
-from ai_trading_society.agents.traits import _PERSONALITY_DESCRIPTIONS
-from ai_trading_society.market_env import MarketEnv
-from ai_trading_society.market_events import EVENT_TEMPLATES, EventType
-from ai_trading_society.simulator import Simulator
 from ai_trading_society.console_utils import (
-    agent_type_label,
     agent_personality,
     agent_personality_desc,
+    agent_type_label,
 )
+from ai_trading_society.market_env import MarketEnv
+from ai_trading_society.market_events import EVENT_TEMPLATES
+from ai_trading_society.simulator import Simulator
 
 app = Flask(__name__, template_folder="../../templates", static_folder="../../static")
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "ai-trading-society-local-secret")
+# Never fall back to a hard-coded secret: it would let an attacker on the
+# local network forge session cookies. Generate a fresh random key per boot.
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.urandom(24)
 
 # ---------------------------------------------------------------------------
 # Session state is server-side; the browser cookie stores only its identifier.
@@ -86,18 +88,37 @@ def _parse_int(value, field: str, *, minimum: int = 0):
     return parsed, None, None
 
 
-def _parse_float(value, field: str, *, default: float = 0.0, minimum: float = 0.0):
+def _parse_float(value, field: str, *, minimum: float = 0.0, maximum=None):
     """Parse a numeric API value (int/float/numeric string) into a float."""
     if isinstance(value, bool) or value is None:
-        return default, None, None
+        return None, jsonify({"error": f"{field} must be a number."}), 400
     try:
         parsed = float(value)
     except (TypeError, ValueError):
         return None, jsonify({"error": f"{field} must be a number."}), 400
     if parsed < minimum:
         return None, jsonify({"error": f"{field} must be at least {minimum}."}), 400
+    if maximum is not None and parsed > maximum:
+        return None, jsonify({"error": f"{field} must be at most {maximum}."}), 400
     return parsed, None, None
 
+
+@app.before_request
+def csrf_protect():
+    """Reject cross-origin state-changing requests (CSRF / DNS rebinding).
+
+    Requests without an Origin header (curl, the test client, same-origin
+    form posts) are allowed; requests carrying a mismatched Origin are not.
+    """
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return None
+    origin = request.headers.get("Origin")
+    if not origin:
+        return None
+    host = request.host_url.rstrip("/")
+    if origin != host:
+        return jsonify({"error": "Cross-origin request blocked."}), 403
+    return None
 
 
 @app.errorhandler(Exception)
@@ -149,19 +170,28 @@ def api_start():
     steps, error, status = _parse_int(data.get("steps", 25), "steps", minimum=1)
     if error:
         return error, status
-    price, error, status = _parse_float(data.get("price", 100.0), "price", default=100.0, minimum=0.01)
+    price, error, status = _parse_float(
+        data.get("price", 100.0), "price", minimum=0.01
+    )
     if error:
         return error, status
-    cash, error, status = _parse_float(data.get("cash", 10000.0), "cash", default=10000.0, minimum=0.0)
+    cash, error, status = _parse_float(
+        data.get("cash", 10000.0), "cash", minimum=0.0
+    )
     if error:
         return error, status
     hold, error, status = _parse_int(data.get("hold", 20), "hold", minimum=0)
     if error:
         return error, status
-    fee, error, status = _parse_float(data.get("fee", 0.001), "fee", default=0.001, minimum=0.0)
+    fee, error, status = _parse_float(data.get("fee", 0.001), "fee", minimum=0.0, maximum=0.5)
     if error:
         return error, status
-    slip, error, status = _parse_float(data.get("slip", 0.001), "slip", default=0.001, minimum=0.0)
+    slip, error, status = _parse_float(data.get("slip", 0.001), "slip", minimum=0.0, maximum=0.5)
+    if error:
+        return error, status
+    social_influence, error, status = _parse_float(
+        data.get("social_influence", 0.0), "social_influence", minimum=0.0, maximum=1.0
+    )
     if error:
         return error, status
     provider = data.get("provider") or "openai"
@@ -183,6 +213,7 @@ def api_start():
         slippage_rate=slip,
         event_probability_multiplier=1.5,
         random_traits=True,
+        social_influence=social_influence,
         seed=seed,
     )
 
@@ -197,11 +228,19 @@ def api_start():
         print(f"[api/start] build_agent_roster failed: {exc}")
         return jsonify({"error": str(exc)}), 400
 
-    env = MarketEnv(config, agents)
+    try:
+        env = MarketEnv(config, agents)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     sim = Simulator(env)
 
     # Wire up the always-present player agent so it can read buffered actions.
     player_agent._env = env
+
+    # Resolve social relationships (idol/friends/enemies) so peers' recent
+    # trades flow into each agent's observation for herding behavior.
+    env.social_map = resolve_social_map(list(env.agents.values()))
+    env._social_influence = config.social_influence
 
 
     # Create run metadata
@@ -353,7 +392,11 @@ def api_step():
             for e in triggered_events
         ],
         "active_events": [
-            {"name": e.get("name", ""), "remaining": e.get("remaining_steps", 0), "total": e.get("total_steps", 1)}
+            {
+                "name": e.get("name", ""),
+                "remaining": e.get("remaining_steps", 0),
+                "total": e.get("total_steps", 1),
+            }
             for e in active_events
         ],
         "price_history": [round(p, 2) for p in env.price_history],
@@ -463,7 +506,11 @@ def api_god_event():
     event_name = data.get("event_name", "custom_news")
     # None (or omitted) -> the template's own description is used.
     description = data.get("description")
-    price_impact = float(data.get("price_impact", 0.05))
+    price_impact, error, status = _parse_float(
+        data.get("price_impact", 0.05), "price_impact", minimum=-1.0, maximum=1.0
+    )
+    if error:
+        return error, status
 
     env = state["env"]
     if env.event_manager is not None:
@@ -495,27 +542,50 @@ def api_god_config():
     data = request.get_json(silent=True) or {}
     env = state["env"]
     if "price_sensitivity" in data:
-        env.config.price_sensitivity = float(data["price_sensitivity"])
+        val, error, status = _parse_float(
+            data["price_sensitivity"], "price_sensitivity", minimum=0.0, maximum=1.0
+        )
+        if error:
+            return error, status
+        env.config.price_sensitivity = val
     if "max_price_change_ratio" in data:
-        env.config.max_price_change_ratio = float(data["max_price_change_ratio"])
+        val, error, status = _parse_float(
+            data["max_price_change_ratio"], "max_price_change_ratio", minimum=0.0, maximum=1.0
+        )
+        if error:
+            return error, status
+        env.config.max_price_change_ratio = val
     # Control random events: event_multiplier 0 disables, >0 enables with scale
     if "event_multiplier" in data:
-        mult = max(0.0, float(data["event_multiplier"]))
-        env.config.event_probability_multiplier = mult
+        val, error, status = _parse_float(
+            data["event_multiplier"], "event_multiplier", minimum=0.0, maximum=10.0
+        )
+        if error:
+            return error, status
+        env.config.event_probability_multiplier = val
         if env.event_manager is not None:
-            env.event_manager.multiplier = mult
+            env.event_manager.multiplier = val
     # Persistent sentiment drift added to every agent observation.
     if "sentiment_drift" in data:
         try:
             env._sentiment_drift = max(-1.0, min(1.0, float(data["sentiment_drift"])))
         except (TypeError, ValueError):
             pass
+    # Runtime social-influence strength override (0 = off, 1 = strong).
+    if "social_influence" in data:
+        val, error, status = _parse_float(
+            data["social_influence"], "social_influence", minimum=0.0, maximum=1.0
+        )
+        if error:
+            return error, status
+        env._social_influence = val
     return jsonify({
         "ok": True,
         "price_sensitivity": env.config.price_sensitivity,
         "max_price_change_ratio": env.config.max_price_change_ratio,
         "event_multiplier": env.config.event_probability_multiplier,
         "sentiment_drift": getattr(env, "_sentiment_drift", 0.0),
+        "social_influence": getattr(env, "_social_influence", getattr(env.config, "social_influence", 0.0)),
     })
 
 
@@ -552,7 +622,11 @@ def api_agents_social():
 
         # Extract trait values if available
         traits = {}
-        for t in ("panic", "greed", "fomo", "stubbornness", "loss_aversion", "overconfidence", "regret_avoidance"):
+        trait_names = (
+            "panic", "greed", "fomo", "stubbornness",
+            "loss_aversion", "overconfidence", "regret_avoidance",
+        )
+        for t in trait_names:
             val = getattr(agent, t, None)
             if val is not None and val > 0:
                 traits[t] = round(float(val), 2)

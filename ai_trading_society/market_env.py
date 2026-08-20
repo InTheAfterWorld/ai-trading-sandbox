@@ -10,11 +10,13 @@ Core responsibilities:
 """
 
 import math
+import random
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from types import ModuleType
+from typing import Any, Dict, List, Optional, Union
 
-from .config import MarketConfig
 from .base_agent import BaseAgent
+from .config import MarketConfig
 from .market_events import EventManager
 
 
@@ -59,9 +61,17 @@ class MarketEnv:
         # global RNG).
         if seed is None and config.seed is not None:
             seed = config.seed
-        import random as _random
-        self.rng = _random.Random(seed) if seed is not None else _random
+        self.rng: Union[random.Random, ModuleType] = (
+            random.Random(seed) if seed is not None else random
+        )
 
+        # Reject duplicate agent IDs up front: a dict comprehension would
+        # silently overwrite the earlier agent, dropping it from the run.
+        seen: set = set()
+        for a in agents:
+            if a.agent_id in seen:
+                raise ValueError(f"Duplicate agent_id: {a.agent_id!r}")
+            seen.add(a.agent_id)
         self.agents: Dict[str, BaseAgent] = {a.agent_id: a for a in agents}
 
         # Inject RNG into agents (and into wrapped base_agent if present)
@@ -89,6 +99,17 @@ class MarketEnv:
             event_probability_multiplier=config.event_probability_multiplier,
             rng=self.rng,
         )
+
+        # --- Social influence ---
+        # social_map: agent_id -> {"idol": str|None, "friends": [...], "enemies": [...]}
+        # Set after construction (web/CLI) via resolve_social_map().
+        self.social_map: Dict[str, dict] = {}
+        # Last round's resolved actions per agent, fed into next-round
+        # observations so peers can react to each other (herding).
+        self._recent_actions: Dict[str, dict] = {}
+        # Runtime influence strength override (set via God Mode); falls back
+        # to config.social_influence when None.
+        self._social_influence: Optional[float] = None
 
     def set_player_action(self, action: str, quantity: int):
         """Buffer the human player's action for the current step.
@@ -118,7 +139,7 @@ class MarketEnv:
         agent = self.agents[agent_id]
         hist_len = min(len(self.price_history), self.config.price_history_length)
 
-        obs = {
+        obs: Dict[str, Any] = {
             "step": self.step_count,
             "price": self.price,
             "price_history": self.price_history[-hist_len:],
@@ -141,6 +162,38 @@ class MarketEnv:
             obs["market_sentiment"] = max(
                 -1.0, min(1.0, obs["market_sentiment"] + drift)
             )
+
+        # --- Social influence ---
+        # Expose this agent's social peers' most recent resolved actions so the
+        # TraitAgent layer can mimic friends/idol and fade enemies. Only agents
+        # that actually traded (action != hold) carry a signal.
+        rel_map = self.social_map.get(agent_id)
+        if rel_map:
+            groups = (
+                ("idol", [rel_map["idol"]] if rel_map.get("idol") else []),
+                ("friend", rel_map.get("friends", [])),
+                ("enemy", rel_map.get("enemies", [])),
+            )
+            peers = []
+            for relation, ids in groups:
+                for pid in ids:
+                    if not pid or pid == agent_id:
+                        continue
+                    r = self._recent_actions.get(pid)
+                    if r and r.get("action", "hold") != "hold":
+                        peers.append({
+                            "id": pid,
+                            "relation": relation,
+                            "action": r.get("action", "hold"),
+                            "quantity": int(r.get("filled", 0)),
+                        })
+            if peers:
+                obs["social_peers"] = peers
+        influence = self._social_influence
+        if influence is None:
+            influence = getattr(self.config, "social_influence", 0.0)
+        if influence:
+            obs["social_influence"] = float(influence)
 
         return obs
 
@@ -239,6 +292,16 @@ class MarketEnv:
             if trade.step == self.step_count:
                 agent_actions[trade.agent_id]["filled_qty"] += trade.quantity
 
+        # Snapshot this round's resolved actions so next round's observations
+        # can feed them to social peers (herding / contrarian behavior).
+        self._recent_actions = {
+            aid: {
+                "action": info.get("action", "hold"),
+                "filled": int(info.get("filled_qty", 0)),
+            }
+            for aid, info in agent_actions.items()
+        }
+
         # ---------- 3. Update price from net buying pressure and mean reversion ----------
         total_volume = total_buy + total_sell
         if total_volume > 0:
@@ -330,7 +393,7 @@ class MarketEnv:
             # distribute remaining residuals by largest fractional part.
             fill_ratio = total_sell / max(total_buy, 1)
             ideal = [(agent_id, qty * fill_ratio, qty) for agent_id, qty in buy_orders]
-            floors = [(aid, int(math.floor(val)), frac := val - math.floor(val), orig)
+            floors = [(aid, int(math.floor(val)), val - math.floor(val), orig)
                       for aid, val, orig in ideal]
             allocated = {aid: fl for aid, fl, _, _ in floors}
             filled_total = sum(allocated.values())
@@ -365,7 +428,7 @@ class MarketEnv:
 
             fill_ratio = total_buy / max(total_sell, 1)
             ideal = [(agent_id, qty * fill_ratio, qty) for agent_id, qty in sell_orders]
-            floors = [(aid, int(math.floor(val)), frac := val - math.floor(val), orig)
+            floors = [(aid, int(math.floor(val)), val - math.floor(val), orig)
                       for aid, val, orig in ideal]
             allocated = {aid: fl for aid, fl, _, _ in floors}
             filled_total = sum(allocated.values())

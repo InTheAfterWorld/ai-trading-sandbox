@@ -2,22 +2,19 @@
 Unit tests for run metadata, versioning, random seed reproducibility, and snapshot saving.
 """
 
-import json
 import os
 import tempfile
-import pytest
 
 from ai_trading_society.config import MarketConfig
 from ai_trading_society.market_env import MarketEnv
-from ai_trading_society.simulator import Simulator
-from tests.conftest import ScriptedExternalAIAgent
 from ai_trading_society.run_metadata import (
     RunMetadata,
     get_code_version,
     load_run_snapshot,
-    save_run_snapshot,
     set_seed,
 )
+from ai_trading_society.simulator import Simulator
+from tests.conftest import ScriptedExternalAIAgent
 
 
 def test_set_seed_reproducibility():
@@ -94,7 +91,7 @@ def test_save_and_load_run_snapshot():
         agents = [ScriptedExternalAIAgent("R1", cash=10000, holdings=10)]
         env = MarketEnv(config, agents, seed=777)
         sim = Simulator(env)
-        state_history = sim.run(steps=5, verbose=False, seed=777, save_snapshot=True, runs_dir=tmpdir)
+        sim.run(steps=5, verbose=False, seed=777, save_snapshot=True, runs_dir=tmpdir)
 
         run_id = sim.metadata.run_id
         run_folder = os.path.join(tmpdir, run_id)

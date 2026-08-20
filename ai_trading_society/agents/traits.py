@@ -35,6 +35,11 @@ class TraitAgent(BaseAgent):
         Hold losers to avoid realizing losses. (0.0-1.0)
     """
 
+    # Temporary balances stored via the cash/holdings setters while
+    # super().__init__() runs (before base_agent exists).
+    _cash_tmp: float
+    _holdings_tmp: int
+
     def __init__(
         self,
         base_agent: BaseAgent,
@@ -77,8 +82,7 @@ class TraitAgent(BaseAgent):
         self._initial_wealth: float = 0.0
 
         # Default RNG; may be overridden by MarketEnv injection
-        import random as _random
-        self.rng = _random
+        self.rng = random
 
         # Track state for trait logic
         self._peak_wealth: Optional[float] = None
@@ -147,6 +151,9 @@ class TraitAgent(BaseAgent):
         action_type, quantity = self._apply_regret_avoidance(observation, action_type, quantity)
         action_type, quantity = self._apply_stubbornness(action_type, quantity)
         action_type, quantity = self._apply_overconfidence(action_type, quantity)
+        action_type, quantity, social_triggered = self._apply_social(
+            observation, action_type, quantity
+        )
 
         # Remember for next step
         self._last_action = action_type
@@ -154,7 +161,9 @@ class TraitAgent(BaseAgent):
 
         result = {"action": action_type, "quantity": quantity}
         if base_reasoning:
-            if action_type != original_action:
+            if social_triggered:
+                result["reasoning"] = f"[social] {base_reasoning}"
+            elif action_type != original_action:
                 result["reasoning"] = f"[trait override] {base_reasoning}"
             else:
                 result["reasoning"] = base_reasoning
@@ -316,6 +325,71 @@ class TraitAgent(BaseAgent):
             return action, int(quantity * multiplier)
 
         return action, quantity
+
+    def _apply_social(
+        self, obs: Dict[str, Any], action: str, quantity: int
+    ) -> tuple[str, int, bool]:
+        """Mimic friends/idol trades, fade enemies — drives herding.
+
+        Peers' most recent resolved actions arrive in the observation as
+        ``social_peers`` (list of {id, relation, action, quantity}). The
+        global influence strength (0.0-1.0) scales how often the agent
+        abandons its own plan to follow the herd.
+
+        - idol/friend buys → agent buys (herd in)
+        - idol/friend sells → agent sells (bank-run cascade)
+        - enemies act the opposite way (contrarian fade)
+
+        Returns (action, quantity, triggered) where ``triggered`` flags a
+        social override so the reasoning can be annotated "[social]".
+        """
+        peers = obs.get("social_peers") or []
+        if not peers:
+            return action, quantity, False
+
+        influence = float(obs.get("social_influence", 0.0) or 0.0)
+        if influence <= 0:
+            return action, quantity, False
+
+        # Relation -> weight. Enemies are negative so their trades push the
+        # agent the opposite way (fade the rival).
+        rel_weight = {"idol": 1.0, "friend": 0.6, "enemy": -0.8}
+        act_val = {"buy": 1.0, "sell": -1.0, "hold": 0.0}
+
+        net = 0.0
+        for p in peers:
+            w = rel_weight.get(p.get("relation"), 0.0)
+            v = act_val.get(p.get("action", "hold"), 0.0)
+            if v == 0:
+                continue
+            filled = max(0, int(p.get("quantity", 0)))
+            # Bigger fills shout louder; even an unfilled intent carries buzz.
+            size = min(1.0, filled / 10.0) if filled > 0 else 0.3
+            net += w * v * size
+
+        # Need a meaningful consensus before the herd matters.
+        if abs(net) < 0.3:
+            return action, quantity, False
+
+        # Probability of overriding scales with influence strength × signal.
+        if self.rng.random() > influence * min(1.0, abs(net)):
+            return action, quantity, False
+
+        price = obs.get("price", 100.0)
+        cash = obs.get("my_cash", 0.0)
+        holdings = obs.get("my_holdings", 0)
+
+        if net > 0 and action != "buy":
+            # Herd into a buy (friends/idol are accumulating).
+            qty = int(cash * 0.3 / price) if price > 0 and cash > 0 else 0
+            if qty > 0:
+                return "buy", qty, True
+        elif net < 0 and action != "sell":
+            # Herd into a sell (bank-run style stampede for the exit).
+            qty = max(1, holdings // 2) if holdings > 0 else 0
+            if qty > 0:
+                return "sell", qty, True
+        return action, quantity, False
 
     @property
     def wealth(self) -> float:

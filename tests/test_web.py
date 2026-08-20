@@ -1,6 +1,7 @@
 """Tests for Web UI Flask endpoints."""
 
 import pytest
+
 from ai_trading_society.web.app import app
 
 
@@ -58,7 +59,9 @@ def test_api_config_post_and_get(client, tmp_config_path):
         "price": 250,
         "cash": 5000,
         "hold": 10,
-        "traders": [{"name": "A", "provider": "groq", "model": "groq/compound-mini", "api_key": "k"}],
+        "traders": [
+            {"name": "A", "provider": "groq", "model": "groq/compound-mini", "api_key": "k"}
+        ],
     }
     post_res = client.post("/api/config", json=payload)
     assert post_res.status_code == 200

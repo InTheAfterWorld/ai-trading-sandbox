@@ -6,9 +6,10 @@ Fed decisions, social media hype, black swans, and more.
 """
 
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from types import ModuleType
+from typing import Any, Dict, List, Optional, Union
 
 
 class EventType(Enum):
@@ -20,6 +21,9 @@ class EventType(Enum):
     REGULATORY = "regulatory"
     BLACK_SWAN = "black_swan"
     TECHNICAL = "technical"
+    CRYPTO = "crypto"
+    M_AND_A = "m_and_a"
+    CORPORATE = "corporate"
 
 
 @dataclass
@@ -54,7 +58,7 @@ class MarketEvent:
     duration_steps: int = 1
     probability: float = 0.01
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self.remaining_steps = 0
         self.triggered_step: Optional[int] = None
 
@@ -341,6 +345,129 @@ EVENT_TEMPLATES: List[MarketEvent] = [
         duration_steps=2,
         probability=0.025,
     ),
+
+    # === CRYPTO MARKET EVENTS ===
+    MarketEvent(
+        name="crypto_crash",
+        description="Major cryptocurrencies crash 25%, spilling into equities",
+        event_type=EventType.CRYPTO,
+        price_impact=-0.07,
+        sentiment_shift=-0.45,
+        duration_steps=4,
+        probability=0.012,
+    ),
+    MarketEvent(
+        name="crypto_rally",
+        description="Crypto market surges, lifting risk assets broadly",
+        event_type=EventType.CRYPTO,
+        price_impact=0.05,
+        sentiment_shift=0.3,
+        duration_steps=3,
+        probability=0.015,
+    ),
+    MarketEvent(
+        name="crypto_etf_approval",
+        description="Spot Bitcoin ETF approved, driving institutional inflows",
+        event_type=EventType.CRYPTO,
+        price_impact=0.06,
+        sentiment_shift=0.4,
+        duration_steps=4,
+        probability=0.008,
+    ),
+    MarketEvent(
+        name="crypto_exchange_collapse",
+        description="Major crypto exchange collapses, freezing customer funds",
+        event_type=EventType.CRYPTO,
+        price_impact=-0.10,
+        sentiment_shift=-0.6,
+        duration_steps=5,
+        probability=0.006,
+    ),
+
+    # === MERGERS & ACQUISITIONS ===
+    MarketEvent(
+        name="acquisition_announced",
+        description="Company acquired at 30% premium",
+        event_type=EventType.M_AND_A,
+        price_impact=0.15,
+        sentiment_shift=0.55,
+        duration_steps=2,
+        probability=0.008,
+    ),
+    MarketEvent(
+        name="merger_rumor",
+        description="Merger rumors circulate, driving speculative buying",
+        event_type=EventType.M_AND_A,
+        price_impact=0.06,
+        sentiment_shift=0.35,
+        duration_steps=3,
+        probability=0.012,
+    ),
+    MarketEvent(
+        name="hostile_takeover_bid",
+        description="Hostile takeover bid launched at a premium",
+        event_type=EventType.M_AND_A,
+        price_impact=0.08,
+        sentiment_shift=0.3,
+        duration_steps=4,
+        probability=0.007,
+    ),
+    MarketEvent(
+        name="deal_breakup",
+        description="M&A deal falls through amid regulatory pushback",
+        event_type=EventType.M_AND_A,
+        price_impact=-0.09,
+        sentiment_shift=-0.4,
+        duration_steps=3,
+        probability=0.009,
+    ),
+
+    # === CORPORATE ACTIONS ===
+    MarketEvent(
+        name="stock_buyback",
+        description="Company announces $10B stock buyback program",
+        event_type=EventType.CORPORATE,
+        price_impact=0.05,
+        sentiment_shift=0.3,
+        duration_steps=3,
+        probability=0.014,
+    ),
+    MarketEvent(
+        name="dividend_increase",
+        description="Company raises dividend by 20%",
+        event_type=EventType.CORPORATE,
+        price_impact=0.03,
+        sentiment_shift=0.2,
+        duration_steps=2,
+        probability=0.015,
+    ),
+    MarketEvent(
+        name="stock_split",
+        description="Company announces 3-for-1 stock split",
+        event_type=EventType.CORPORATE,
+        price_impact=0.04,
+        sentiment_shift=0.25,
+        duration_steps=2,
+        probability=0.012,
+    ),
+    MarketEvent(
+        name="spinoff_announced",
+        description="Company announces spinoff of business unit",
+        event_type=EventType.CORPORATE,
+        price_impact=0.04,
+        sentiment_shift=0.2,
+        duration_steps=3,
+        probability=0.01,
+    ),
+    MarketEvent(
+        name="accounting_scandal",
+        description="Accounting irregularities uncovered, SEC launches probe",
+        event_type=EventType.CORPORATE,
+        price_impact=-0.12,
+        sentiment_shift=-0.65,
+        duration_steps=6,
+        probability=0.006,
+    ),
 ]
 
 
@@ -361,7 +488,7 @@ class EventManager:
         self,
         templates: Optional[List[MarketEvent]] = None,
         event_probability_multiplier: float = 1.0,
-        rng: Optional[random.Random] = None,
+        rng: Optional[Union[random.Random, ModuleType]] = None,
     ):
         self.templates = templates or EVENT_TEMPLATES.copy()
         self.multiplier = event_probability_multiplier
