@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-trading-sandbox"
+version = "0.2.0"
+description = "A multi-agent stock market sandbox for experimenting with AI trading behavior."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [{name = "AI Trading Society Contributors"}]
+keywords = ["simulation", "multi-agent", "stock-market", "ai", "sandbox"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.optional-dependencies]
+viz = ["matplotlib>=3.7"]
+config = ["pyyaml>=6.0"]
+ai = ["openai>=1.0", "anthropic>=0.18", "google-generativeai>=0.3", "python-dotenv>=1.0"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.1", "mypy>=1.0"]
+all = ["matplotlib>=3.7", "pyyaml>=6.0", "openai>=1.0", "anthropic>=0.18", "google-generativeai>=0.3", "python-dotenv>=1.0"]
+
+[project.scripts]
+ai-trading-society = "ai_trading_society.__main__:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.setuptools.packages.find]
+include = ["ai_trading_society*"]

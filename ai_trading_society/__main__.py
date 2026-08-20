@@ -1,0 +1,114 @@
+"""
+Entry point: python -m ai_trading_society
+
+Runs demo simulations with AI agents in unified society mode.
+
+The CLI reads the same configuration (user_config.json) that the web
+homepage saves, so a simulation configured in the browser runs
+identically from the terminal. Optional flags override individual fields.
+"""
+
+from typing import Optional
+
+from .config import MarketConfig
+from .market_env import MarketEnv
+from .simulator import Simulator
+from .config_store import load_config
+from .agents.roster import build_agent_roster, DEFAULT_AI_MODELS
+
+# Re-export AI_MODELS for backwards compatibility
+AI_MODELS = DEFAULT_AI_MODELS
+
+
+def run_society_mode(
+    interactive: bool = False,
+    seed: Optional[int] = None,
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    steps: Optional[int] = None,
+):
+    """Run unified society mode simulation (events + traits always on)."""
+    print("\n" + "=" * 60)
+    print("  AI TRADING SOCIETY")
+    print("  AI agents trade with events and personality traits")
+    print("=" * 60)
+
+    cfg = load_config()
+    provider = provider or cfg.get("provider") or "openai"
+    model = model or cfg.get("model") or "gpt-4o"
+    trader_configs = cfg.get("traders") or None
+    steps = steps or cfg.get("steps") or 5
+
+    config = MarketConfig(
+        initial_price=float(cfg.get("price", 100.0)),
+        price_sensitivity=0.02,
+        max_price_change_ratio=0.10,
+        event_probability_multiplier=1.5,
+        random_traits=True,
+        seed=seed,
+        fee_rate=float(cfg.get("fee", 0.001)),
+        slippage_rate=float(cfg.get("slip", 0.001)),
+    )
+
+    agents, _ = build_agent_roster(
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        trader_configs=trader_configs,
+        cash=float(cfg.get("cash", 10000.0)),
+        holdings=int(cfg.get("hold", 20)),
+    )
+    env = MarketEnv(config, agents, seed=seed)
+    sim = Simulator(env)
+
+    sim.run(
+        steps=steps,
+        verbose=True,
+        round_by_round=True,
+        interactive=interactive,
+        seed=seed,
+    )
+    sim.report(generate_charts=True, chart_output_dir="charts")
+
+
+def main(
+    provider: Optional[str] = None,
+    model: Optional[str] = None,
+    api_key: Optional[str] = None,
+    steps: Optional[int] = None,
+):
+    """Main entry point."""
+    print("\n" + "=" * 60)
+    print("  AI TRADING SOCIETY")
+    print("  Multi-Agent Stock Market Sandbox")
+    print("=" * 60)
+
+    print("\nThe web dashboard lets the always-present player observe or intervene.")
+    print()
+    print("Config is shared with the homepage (user_config.json). Pass --provider, ")
+    print("--model, or --api-key to override what was saved in the browser.")
+    print()
+
+    # Ask whether to run in interactive (step-by-step) mode.
+    interactive = False
+    try:
+        ans = input(
+            "Interactive mode? Pause after each round? (y/n) [default: n]: "
+        ).strip().lower()
+        if ans in ("y", "yes"):
+            interactive = True
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+    run_society_mode(
+        interactive=interactive,
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        steps=steps,
+    )
+
+
+if __name__ == "__main__":
+    main()
