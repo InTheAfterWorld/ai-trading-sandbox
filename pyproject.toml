@@ -9,7 +9,7 @@ description = "A multi-agent stock market sandbox for experimenting with AI trad
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
-authors = [{name = "AI Trading Society Contributors"}]
+authors = [{name = "AI TRADING SANDBOX Contributors"}]
 keywords = ["simulation", "multi-agent", "stock-market", "ai", "sandbox"]
 classifiers = [
     "Development Status :: 3 - Alpha",

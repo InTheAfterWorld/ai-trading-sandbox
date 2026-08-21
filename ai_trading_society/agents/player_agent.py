@@ -17,13 +17,42 @@ class PlayerAgent(BaseAgent):
         self._env = None  # Set by MarketEnv or web_app after construction
 
     def act(self, observation: Dict[str, Any]) -> Dict[str, Any]:
-        """Return the action buffered by the web UI, or hold."""
+        """Return decisions for all stocks, reading buffered player actions."""
+        # Get the list of stock names from the observation.
+        stocks = observation.get("stocks", [])
+        all_symbols = [s.get("name") or s.get("symbol") for s in stocks if s.get("name") or s.get("symbol")]
+
         if self._env is not None:
-            pending = self._env.pop_player_action()
+            pending = self._env.pop_player_actions()
             if pending:
-                return {
-                    "action": pending["action"],
-                    "quantity": pending["quantity"],
-                    "reasoning": "Player decision",
-                }
-        return {"action": "hold", "quantity": 0, "reasoning": "Player chose to hold"}
+                decisions = []
+                covered = set()
+                for sym, act in pending.items():
+                    if sym in all_symbols or not all_symbols:
+                        decisions.append({
+                            "name": sym,
+                            "symbol": sym,
+                            "action": act["action"],
+                            "quantity": act["quantity"],
+                            "reasoning": "Player decision",
+                        })
+                        covered.add(sym)
+                # Fill remaining stocks with hold.
+                for sym in all_symbols:
+                    if sym not in covered:
+                        decisions.append({
+                            "name": sym,
+                            "symbol": sym,
+                            "action": "hold",
+                            "quantity": 0,
+                            "reasoning": "Player chose to hold",
+                        })
+                return {"decisions": decisions}
+
+        # Default: hold all stocks.
+        decisions = [
+            {"name": sym, "symbol": sym, "action": "hold", "quantity": 0,
+             "reasoning": "Player chose to hold"}
+            for sym in all_symbols
+        ]
+        return {"decisions": decisions}

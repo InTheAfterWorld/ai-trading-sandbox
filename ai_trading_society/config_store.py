@@ -26,6 +26,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "provider": "openai",
     "model": "gpt-4o",
     "traders": [],
+    "stocks": [],
 }
 
 # Default location of the shared config file. Overridable for tests.
@@ -64,6 +65,39 @@ def _normalize_traders(traders: Any) -> list:
     return out
 
 
+def _normalize_stocks(stocks: Any) -> list:
+    """Coerce a raw stocks payload into a clean list of dicts.
+
+    Each stock entry carries: name, price (initial price), and
+    hold (initial per-agent holdings). Duplicate names are dropped.
+    """
+    if not isinstance(stocks, list):
+        return []
+    out = []
+    seen_names = set()
+    for s in stocks:
+        if not isinstance(s, dict):
+            continue
+        name = str(s.get("name") or s.get("symbol") or "").strip()
+        if not name or name in seen_names:
+            continue
+        seen_names.add(name)
+        try:
+            price = float(s.get("price", s.get("initial_price", 100.0)))
+        except (TypeError, ValueError):
+            price = 100.0
+        try:
+            hold = int(s.get("hold", s.get("initial_holdings", 0)))
+        except (TypeError, ValueError):
+            hold = 0
+        out.append({
+            "name": name,
+            "price": price,
+            "hold": hold,
+        })
+    return out
+
+
 _INT_KEYS = ("steps", "hold")
 _FLOAT_KEYS = ("price", "cash", "fee", "slip")
 _STR_KEYS = ("provider", "model")
@@ -89,6 +123,28 @@ def _apply_scalar_fields(cfg: Dict[str, Any], data: Dict[str, Any]) -> None:
             cfg[key] = float(val)
 
 
+def _migrate_legacy_stocks(cfg: Dict[str, Any], data: Dict[str, Any]) -> None:
+    """Populate ``cfg["stocks"]`` from the payload.
+
+    If the payload has an explicit non-empty ``stocks`` list, it is normalized
+    and used. Otherwise, a legacy single-stock config (top-level
+    ``price``/``hold``) is migrated into a one-element stocks list so old
+    saved configs keep working.
+    """
+    stocks = data.get("stocks")
+    if isinstance(stocks, list) and stocks:
+        cfg["stocks"] = _normalize_stocks(stocks)
+        return
+    # Legacy single-stock migration.
+    price = cfg.get("price", 100.0)
+    hold = cfg.get("hold", 0)
+    cfg["stocks"] = [{
+        "name": "Stock 1",
+        "price": price,
+        "hold": hold,
+    }]
+
+
 def load_config(path: Optional[str] = None) -> Dict[str, Any]:
     """
     Load the saved user configuration, falling back to defaults on any error.
@@ -112,6 +168,7 @@ def load_config(path: Optional[str] = None) -> Dict[str, Any]:
             return cfg
         _apply_scalar_fields(cfg, data)
         cfg["traders"] = _normalize_traders(data.get("traders"))
+        _migrate_legacy_stocks(cfg, data)
     except (OSError, ValueError):
         pass
     return cfg
@@ -136,6 +193,7 @@ def save_config(data: Dict[str, Any], path: Optional[str] = None) -> Dict[str, A
     cfg = dict(DEFAULT_CONFIG)
     _apply_scalar_fields(cfg, data)
     cfg["traders"] = _normalize_traders(data.get("traders", cfg["traders"]))
+    _migrate_legacy_stocks(cfg, data)
 
     cfg_path = Path(path) if path else Path(CONFIG_PATH)
     cfg_path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,4 +1,4 @@
-"""
+﻿"""
 Entry point: python -m ai_trading_society
 
 Runs demo simulations with AI agents in unified society mode.
@@ -11,7 +11,7 @@ identically from the terminal. Optional flags override individual fields.
 from typing import Optional
 
 from .agents.roster import DEFAULT_AI_MODELS, build_agent_roster
-from .config import MarketConfig
+from .config import MarketConfig000, StockSpec
 from .config_store import load_config
 from .market_env import MarketEnv
 from .simulator import Simulator
@@ -30,7 +30,7 @@ def run_society_mode(
 ):
     """Run unified society mode simulation (events + traits always on)."""
     print("\n" + "=" * 60)
-    print("  AI TRADING SOCIETY")
+    print("  AI TRADING SANDBOX")
     print("  AI agents trade with events and personality traits")
     print("=" * 60)
 
@@ -39,6 +39,30 @@ def run_society_mode(
     model = model or cfg.get("model") or "gpt-4o"
     trader_configs = cfg.get("traders") or None
     steps = steps or cfg.get("steps") or 5
+
+    # Parse multi-stock configuration (falls back to a single default stock).
+    raw_stocks = cfg.get("stocks") or []
+    stock_specs: list = []
+    if raw_stocks:
+        for s in raw_stocks:
+            if not isinstance(s, dict):
+                continue
+            symbol = str(s.get("symbol") or "").strip().upper()
+            if not symbol:
+                continue
+            stock_specs.append(StockSpec(
+                name=str(s.get("name") or symbol),
+                symbol=symbol,
+                initial_price=float(s.get("price", s.get("initial_price", cfg.get("price", 100.0)))),
+                initial_holdings=int(s.get("hold", s.get("initial_holdings", cfg.get("hold", 0)))),
+            ))
+    if not stock_specs:
+        stock_specs = [StockSpec(
+            name="Stock 1",
+            symbol="ATSX",
+            initial_price=float(cfg.get("price", 100.0)),
+            initial_holdings=int(cfg.get("hold", 0)),
+        )]
 
     config = MarketConfig(
         initial_price=float(cfg.get("price", 100.0)),
@@ -49,6 +73,7 @@ def run_society_mode(
         seed=seed,
         fee_rate=float(cfg.get("fee", 0.001)),
         slippage_rate=float(cfg.get("slip", 0.001)),
+        stocks=stock_specs,
     )
 
     agents, player_agent = build_agent_roster(
@@ -58,6 +83,7 @@ def run_society_mode(
         trader_configs=trader_configs,
         cash=float(cfg.get("cash", 10000.0)),
         holdings=int(cfg.get("hold", 20)),
+        stocks=stock_specs,
     )
     env = MarketEnv(config, agents, seed=seed)
     # Wire the player agent to the environment so its buffered orders are
@@ -84,7 +110,7 @@ def main(
 ):
     """Main entry point."""
     print("\n" + "=" * 60)
-    print("  AI TRADING SOCIETY")
+    print("  AI TRADING SANDBOX")
     print("  Multi-Agent Stock Market Sandbox")
     print("=" * 60)
 

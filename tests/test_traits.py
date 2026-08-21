@@ -47,6 +47,24 @@ class TestStateSync:
 class TestRegretAvoidance:
     """Test that regret_avoidance uses actual initial wealth, not hardcoded 10000."""
 
+    def _obs(self, step, price, price_history, my_cash, my_holdings, my_wealth):
+        """Build a multi-stock observation dict."""
+        return {
+            "step": step,
+            "stocks": [{
+                "symbol": "ATSX",
+                "name": "Stock 1",
+                "price": price,
+                "price_history": price_history,
+                "last_volume": 0,
+                "my_holdings": my_holdings,
+            }],
+            "my_cash": my_cash,
+            "my_holdings": {"ATSX": my_holdings},
+            "my_wealth": my_wealth,
+            "market_sentiment": 0.0,
+        }
+
     def test_uses_actual_initial_wealth(self):
         """Agent with 50000 initial should use 50000 as threshold, not 10000."""
         base = ScriptedExternalAIAgent(
@@ -55,31 +73,16 @@ class TestRegretAvoidance:
         trait = TraitAgent(base, regret_avoidance=1.0)
 
         # First act to capture initial wealth
-        obs1 = {
-            "step": 1,
-            "price": 100.0,
-            "price_history": [100] * 10,
-            "my_cash": 50000.0,
-            "my_holdings": 100,
-            "my_wealth": 60000.0,  # 50000 + 100*100
-            "market_sentiment": 0.0,
-        }
+        obs1 = self._obs(1, 100.0, [100] * 10, 50000.0, 100, 60000.0)
         trait.act(obs1)
 
         # Now simulate being below threshold: wealth must be strictly < 57000
         # price = 69: wealth = 50000 + 100*69 = 56900 < 57000
-        obs2 = {
-            "step": 2,
-            "price": 69.0,  # 50000 + 100*69 = 56900, which is < 60000*0.95=57000
-            "price_history": [100, 95, 90, 85, 80, 75, 69],
-            "my_cash": 50000.0,
-            "my_holdings": 100,
-            "my_wealth": 56900.0,
-            "market_sentiment": 0.0,
-        }
+        obs2 = self._obs(2, 69.0, [100, 95, 90, 85, 80, 75, 69], 50000.0, 100, 56900.0)
         # base agent wants to sell, but regret_avoidance=1.0 should block it
         action = trait.act(obs2)
-        assert action["action"] == "hold", \
+        decisions = action["decisions"]
+        assert decisions[0]["action"] == "hold", \
             "Regret avoidance should block selling when below initial wealth threshold"
 
     def test_does_not_trigger_when_wealth_above_threshold(self):
@@ -89,34 +92,37 @@ class TestRegretAvoidance:
         )
         trait = TraitAgent(base, regret_avoidance=1.0)
 
-        obs1 = {
-            "step": 1,
-            "price": 100.0,
-            "price_history": [100] * 10,
-            "my_cash": 50000.0,
-            "my_holdings": 100,
-            "my_wealth": 60000.0,
-            "market_sentiment": 0.0,
-        }
+        obs1 = self._obs(1, 100.0, [100] * 10, 50000.0, 100, 60000.0)
         trait.act(obs1)
 
         # Wealth went UP, should still allow selling
-        obs2 = {
-            "step": 2,
-            "price": 120.0,  # 50000 + 100*120 = 62000, above 60000*0.95=57000
-            "price_history": [100, 105, 110, 115, 120],
-            "my_cash": 50000.0,
-            "my_holdings": 100,
-            "my_wealth": 62000.0,
-            "market_sentiment": 0.0,
-        }
+        obs2 = self._obs(2, 120.0, [100, 105, 110, 115, 120], 50000.0, 100, 62000.0)
         action = trait.act(obs2)
-        assert action["action"] == "sell", \
+        decisions = action["decisions"]
+        assert decisions[0]["action"] == "sell", \
             "Regret avoidance should NOT block selling when above threshold"
 
 
 class TestPanic:
     """Test panic selling trait."""
+
+    def _obs(self, step, price, price_history, my_cash, my_holdings, my_wealth):
+        """Build a multi-stock observation dict."""
+        return {
+            "step": step,
+            "stocks": [{
+                "symbol": "ATSX",
+                "name": "Stock 1",
+                "price": price,
+                "price_history": price_history,
+                "last_volume": 0,
+                "my_holdings": my_holdings,
+            }],
+            "my_cash": my_cash,
+            "my_holdings": {"ATSX": my_holdings},
+            "my_wealth": my_wealth,
+            "market_sentiment": 0.0,
+        }
 
     def test_panic_sells_on_drawdown(self):
         """Panic trait should trigger sell on significant drawdown."""
@@ -126,30 +132,15 @@ class TestPanic:
         trait = TraitAgent(base, panic=1.0)
 
         # First act: establish peak wealth
-        obs1 = {
-            "step": 1,
-            "price": 100.0,
-            "price_history": [100] * 10,
-            "my_cash": 0.0,
-            "my_holdings": 100,
-            "my_wealth": 10000.0,
-            "market_sentiment": 0.0,
-        }
+        obs1 = self._obs(1, 100.0, [100] * 10, 0.0, 100, 10000.0)
         trait.act(obs1)
 
         # Now: significant drawdown (price drops to 80, wealth = 8000, drawdown = 20%)
-        obs2 = {
-            "step": 2,
-            "price": 80.0,
-            "price_history": [100, 95, 90, 85, 80],
-            "my_cash": 0.0,
-            "my_holdings": 100,
-            "my_wealth": 8000.0,
-            "market_sentiment": 0.0,
-        }
+        obs2 = self._obs(2, 80.0, [100, 95, 90, 85, 80], 0.0, 100, 8000.0)
         action = trait.act(obs2)
-        assert action["action"] == "sell", "Panic should trigger sell on >10% drawdown"
-        assert action["quantity"] == 100, "Panic should sell all holdings"
+        decisions = action["decisions"]
+        assert decisions[0]["action"] == "sell", "Panic should trigger sell on >10% drawdown"
+        assert decisions[0]["quantity"] == 100, "Panic should sell all holdings"
 
 
 class TestOverconfidence:
@@ -162,10 +153,16 @@ class TestOverconfidence:
 
         obs = {
             "step": 1,
-            "price": 105.0,
-            "price_history": [100, 101, 102, 103, 104, 105],
+            "stocks": [{
+                "symbol": "ATSX",
+                "name": "Stock 1",
+                "price": 105.0,
+                "price_history": [100, 101, 102, 103, 104, 105],
+                "last_volume": 0,
+                "my_holdings": 0,
+            }],
             "my_cash": 10000.0,
-            "my_holdings": 0,
+            "my_holdings": {"ATSX": 0},
             "my_wealth": 10000.0,
             "market_sentiment": 0.0,
         }
@@ -178,8 +175,14 @@ class TestOverconfidence:
         # At least one action should have a quantity larger than what
         # the base agent would produce
         base_action = base.act(obs)
-        max_trait_qty = max(a["quantity"] for a in actions if a["quantity"] > 0)
-        assert max_trait_qty > base_action["quantity"], \
+        base_qty = max(
+            d["quantity"] for d in base_action["decisions"] if d["quantity"] > 0
+        )
+        trait_qtys = [
+            d["quantity"] for a in actions for d in a["decisions"] if d["quantity"] > 0
+        ]
+        max_trait_qty = max(trait_qtys)
+        assert max_trait_qty > base_qty, \
             "Overconfidence should produce larger trade sizes at least sometimes"
 
 

@@ -1,5 +1,5 @@
-"""
-Agent implementations for AI Trading Society.
+﻿"""
+Agent implementations for AI TRADING SANDBOX.
 """
 
 from .external_ai_agent import ExternalAIAgent

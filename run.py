@@ -1,5 +1,5 @@
-"""
-Main Entry Point for AI Trading Society.
+﻿"""
+Main Entry Point for AI TRADING SANDBOX.
 
 Usage:
     python run.py             # Start the Web Dashboard (default)
@@ -13,7 +13,7 @@ import argparse
 
 def main():
     parser = argparse.ArgumentParser(
-        description="AI Trading Society — Multi-Agent Stock Market Sandbox",
+        description="AI TRADING SANDBOX — Multi-Agent Stock Market Sandbox",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -63,7 +63,7 @@ def main():
     else:
         from ai_trading_society.web import app
         print("\n" + "=" * 55)
-        print("  AI Trading Society -- Web Dashboard")
+        print("  AI TRADING SANDBOX -- Web Dashboard")
         print(f"  Open http://localhost:{args.port} in your browser")
         print("=" * 55 + "\n")
 

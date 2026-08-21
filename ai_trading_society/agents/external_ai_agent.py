@@ -62,9 +62,10 @@ _DEFAULT_MAX_TOKENS: Dict[str, int] = {
     "groq": 2048,
     "arliai": 2048,
 }
-# Default output cap for all other providers: enough room for a short JSON
-# answer, small enough to stop a chatty model from writing essays.
-_DEFAULT_MAX_TOKENS_FALLBACK = 1024
+# Default output cap for all other providers: enough room for a multi-stock
+# JSON decision list (each stock ≈ 80 tokens), small enough to stop a chatty
+# model from writing essays. 2048 comfortably fits 5 stocks + reasoning.
+_DEFAULT_MAX_TOKENS_FALLBACK = 2048
 
 
 class ExternalAIAgent(BaseAgent):
@@ -172,23 +173,25 @@ class ExternalAIAgent(BaseAgent):
     @staticmethod
     def _default_system_prompt() -> str:
         return (
-            "You are a professional stock trader in a simulated market. "
-            "Your goal is to maximize total wealth (cash + holdings * price).\n\n"
+            "You are a professional stock trader managing a portfolio in a simulated market. "
+            "Your goal is to maximize total wealth (cash + sum of all holdings * their prices).\n\n"
             "Rules:\n"
-            "- You can only trade ONE stock.\n"
-            "- You cannot short sell (holdings >= 0).\n"
-            "- You cannot borrow money (cash >= 0).\n"
-            "- Each step, decide: BUY, SELL, or HOLD.\n\n"
+            "- You can trade multiple stocks, each identified by its name.\n"
+            "- You cannot short sell (holdings >= 0 for each stock).\n"
+            "- You cannot borrow money (cash >= 0, shared across all stocks).\n"
+            "- Each step, you MUST decide for EVERY listed stock: BUY, SELL, or HOLD.\n"
+            "- You may trade multiple stocks in one step (e.g. sell one stock to buy another).\n\n"
             "Response style — CRITICAL:\n"
-            "- Answer like a trader calling an order with a short rationale.\n"
-            "- 'reasoning': 2-3 short sentences, under 50 words total. "
-            "Give a concise take on the move and your plan. No long essays, no hedging.\n"
+            "- Answer like a portfolio manager calling orders with a short rationale.\n"
+            "- 'reasoning' per stock: 1-2 short sentences, under 30 words. "
+            "Give a concise take on the move. No long essays.\n"
             "- Output ONLY the JSON object. No markdown, no code fences, "
             "no preamble, no explanations outside the JSON.\n\n"
             "You remember past decisions; learn from them.\n\n"
             "Respond in valid JSON only:\n"
-            '{"action": "buy"|"sell"|"hold", "quantity": <int>, '
-            '"reasoning": "<2-3 short sentences>"}'
+            '{"decisions": [{"name": "<Stock Name>", "action": "buy"|"sell"|"hold", '
+            '"quantity": <int>, "reasoning": "<1-2 short sentences>"}, ...]}\n'
+            "IMPORTANT: Provide a decision object for EVERY listed stock in the market in the 'decisions' array."
         )
 
     def _build_market_summary(self) -> str:
@@ -196,6 +199,8 @@ class ExternalAIAgent(BaseAgent):
         Build a concise summary of the market trajectory across all
         remembered steps.  This gives the AI a long-horizon view beyond
         the 10-step price window in the observation.
+
+        Tracks the first (primary) stock for backward-compat summary.
         """
         if len(self._market_history) < 2:
             return ""
@@ -246,18 +251,28 @@ class ExternalAIAgent(BaseAgent):
                 # Find the assistant response that follows.
                 if i + 1 < len(recent) and recent[i + 1]["role"] == "assistant":
                     resp = recent[i + 1]["content"]
-                    action_match = re.search(r'"action":\s*"(\w+)"', resp)
-                    qty_match = re.search(r'"quantity":\s*(\d+)', resp)
-                    reasoning_match = re.search(r'"reasoning":\s*"([^"]*)"', resp)
-                    action_str = action_match.group(1) if action_match else "?"
-                    qty_str = qty_match.group(1) if qty_match else "?"
-                    # Keep each memory line short: truncate long reasoning.
-                    reasoning_str = (
-                        reasoning_match.group(1) if reasoning_match else ""
-                    )[:90]
-                    decisions.append(
-                        f"  Step {round_num}: {action_str.upper()} {qty_str} — {reasoning_str}"
+                    # Parse multi-stock decisions format.
+                    # Look for "name"/"symbol" + "action" + "quantity" patterns.
+                    sym_matches = re.findall(
+                        r'"(?:name|symbol)":\s*"([^"]+)".*?"action":\s*"(\w+)".*?"quantity":\s*(\d+)',
+                        resp,
                     )
+                    if sym_matches:
+                        for sym, act, qty in sym_matches:
+                            if act.lower() != "hold":
+                                decisions.append(
+                                    f"  Step {round_num}: {sym} {act.upper()} {qty}"
+                                )
+                    else:
+                        # Fallback: legacy single-stock format.
+                        action_match = re.search(r'"action":\s*"(\w+)"', resp)
+                        qty_match = re.search(r'"quantity":\s*(\d+)', resp)
+                        if action_match and qty_match:
+                            act_str = action_match.group(1)
+                            if act_str.lower() != "hold":
+                                decisions.append(
+                                    f"  Step {round_num}: {act_str.upper()} {qty_match.group(1)}"
+                                )
 
         lines.extend(decisions)
 
@@ -276,7 +291,7 @@ class ExternalAIAgent(BaseAgent):
 
     def _build_prompt(self, observation: Dict[str, Any]) -> str:
         """Convert a market observation into a natural-language prompt."""
-        # Track market history for long-horizon summary.
+        # Track market history for long-horizon summary (primary stock).
         step = observation["step"]
         price = observation["price"]
         self._market_history.append((step, price))
@@ -284,20 +299,34 @@ class ExternalAIAgent(BaseAgent):
         if len(self._market_history) > 100:
             self._market_history = self._market_history[-100:]
 
-        prices = observation["price_history"]
-        price_str = ", ".join(f"${p:.2f}" for p in prices[-5:])
-
         lines = [
             f"Market Data (Step {observation['step']}):",
-            f"- Current Price: ${observation['price']:.2f}",
-            f"- Recent Prices (last 5): [{price_str}]",
             f"- Your Cash: ${observation['my_cash']:.2f}",
-            f"- Your Holdings: {observation['my_holdings']} shares",
             f"- Your Total Wealth: ${observation['my_wealth']:.2f}",
-            f"- Last Matched Volume: {observation['last_volume']} shares",
         ]
 
-        # Include market sentiment when available (realistic mode).
+        # Per-stock market data.
+        stocks = observation.get("stocks", [])
+        if stocks:
+            lines.append(f"- Stocks ({len(stocks)} total):")
+            for s in stocks:
+                stk_name = s.get("name") or s.get("symbol") or "Stock"
+                hist = s.get("price_history", [])
+                price_str = ", ".join(f"${p:.2f}" for p in hist[-5:])
+                lines.append(
+                    f"  * {stk_name}: "
+                    f"${s['price']:.2f} | Holdings: {s.get('my_holdings', 0)} | "
+                    f"Recent Prices: [{price_str}] | Volume: {s.get('last_volume', 0)}"
+                )
+        else:
+            # Fallback for legacy single-stock observations.
+            prices = observation.get("price_history", [])
+            price_str = ", ".join(f"${p:.2f}" for p in prices[-5:])
+            lines.append(f"- Current Price: ${observation.get('price', 0):.2f}")
+            lines.append(f"- Recent Prices: [{price_str}]")
+            lines.append(f"- Your Holdings: {observation.get('my_holdings', 0)}")
+
+        # Include market sentiment when available.
         sentiment = observation.get("market_sentiment", 0.0)
         if sentiment != 0.0:
             lines.append(f"- Market Sentiment: {sentiment:+.2f} (-1=bearish, +1=bullish)")
@@ -317,7 +346,7 @@ class ExternalAIAgent(BaseAgent):
             if memory_ctx:
                 lines.append(f"\n[Your Last Action] {memory_ctx}")
 
-        lines.append("\nWhat action do you take?")
+        lines.append("\nWhat actions do you take for each stock? Output a decision object for EVERY listed stock in the 'decisions' array.")
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
@@ -618,21 +647,28 @@ class ExternalAIAgent(BaseAgent):
         """
         Extract a JSON action object from the AI response.
 
-        Handles pure JSON, markdown code blocks, and JSON embedded in text.
-        Captures the optional "reasoning" field for display purposes.
+        Supports both multi-stock and legacy single-stock formats:
+        - Multi-stock: ``{"decisions": [{"symbol", "action", "quantity",
+          "reasoning"}, ...]}``
+        - Legacy single-stock: ``{"action", "quantity", "reasoning"}``
 
-        A decodable JSON dict that is not an action object (e.g. JSON the
-        model echoed in its reasoning before the real answer) is skipped.
-        When several valid action objects appear (e.g. the model restates a
-        past decision or drafts an answer before the final one), the LAST
-        one wins — the final decision sits at the end of the response.
+        Handles pure JSON, markdown code blocks, and JSON embedded in text.
+        When several valid objects appear, the LAST one wins.
+
+        For multi-stock format, all valid decision entries are collected.
+        For legacy format, a single action object is returned.
         """
         if not isinstance(response, str) or not response.strip():
             raise ValueError("AI response was empty or not text")
 
         decoder = json.JSONDecoder()
-        best: Optional[Dict[str, Any]] = None
+
+        # Try to find a multi-stock "decisions" list first.
+        best_decisions: Optional[List[Dict[str, Any]]] = None
+        # Fallback: legacy single action.
+        best_legacy: Optional[Dict[str, Any]] = None
         saw_invalid = False
+
         for match in re.finditer(r"[\[{]", response):
             try:
                 data, _ = decoder.raw_decode(response[match.start():])
@@ -642,6 +678,42 @@ class ExternalAIAgent(BaseAgent):
             if not isinstance(data, dict):
                 continue
 
+            # Multi-stock format: {"decisions": [...]}
+            if "decisions" in data:
+                raw = data["decisions"]
+                if not isinstance(raw, list):
+                    continue
+                parsed_list: List[Dict[str, Any]] = []
+                all_valid = True
+                for d in raw:
+                    if not isinstance(d, dict):
+                        all_valid = False
+                        break
+                    raw_action = d.get("action")
+                    if not isinstance(raw_action, str) or not raw_action.strip():
+                        all_valid = False
+                        continue
+                    quantity = self._coerce_quantity(d.get("quantity", 0))
+                    if quantity is None:
+                        saw_invalid = True
+                        continue
+                    action = raw_action.strip().lower()
+                    if action not in ("buy", "sell", "hold") or quantity < 0:
+                        saw_invalid = True
+                        continue
+                    stk_name = str(d.get("name") or d.get("symbol") or "").strip()
+                    parsed_list.append({
+                        "name": stk_name,
+                        "symbol": stk_name,
+                        "action": action,
+                        "quantity": quantity,
+                        "reasoning": str(d.get("reasoning", "")).strip(),
+                    })
+                if parsed_list:
+                    best_decisions = parsed_list
+                continue
+
+            # Legacy single-stock format: {"action": "...", "quantity": ...}
             raw_action = data.get("action")
             if not isinstance(raw_action, str) or not raw_action.strip():
                 continue
@@ -652,19 +724,19 @@ class ExternalAIAgent(BaseAgent):
 
             action = raw_action.strip().lower()
             if action not in ("buy", "sell", "hold") or quantity < 0:
-                # An action-like object existed but was invalid; keep scanning
-                # in case a later object is the real answer.
                 saw_invalid = True
                 continue
 
-            best = {
+            best_legacy = {
                 "action": action,
                 "quantity": quantity,
                 "reasoning": str(data.get("reasoning", "")).strip(),
             }
 
-        if best is not None:
-            return best
+        if best_decisions is not None:
+            return {"decisions": best_decisions}
+        if best_legacy is not None:
+            return best_legacy
         if saw_invalid:
             raise ValueError("AI response contained an invalid action or quantity")
         raise ValueError(

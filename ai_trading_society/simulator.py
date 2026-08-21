@@ -142,9 +142,17 @@ class Simulator:
 
         prev_price = self.env.price
 
+        def _agent_wealth(a) -> float:
+            """Portfolio wealth: cash + sum(holdings * price) across stocks."""
+            h = a.holdings if isinstance(a.holdings, dict) else {}
+            return a.cash + sum(
+                h.get(sym, 0) * sm.price
+                for sym, sm in self.env.stocks.items()
+            )
+
         # Capture initial wealths before any trading begins.
         for aid, a in self.env.agents.items():
-            self._initial_wealths[aid] = a.cash + a.holdings * prev_price
+            self._initial_wealths[aid] = _agent_wealth(a)
 
         for i in range(steps):
             state = self.env.step()
@@ -163,9 +171,8 @@ class Simulator:
                     )
 
             # Update prev_wealths for next round's delta display.
-            current_price = state["price"]
             for aid, a in self.env.agents.items():
-                self._prev_wealths[aid] = a.cash + a.holdings * current_price
+                self._prev_wealths[aid] = _agent_wealth(a)
 
             prev_price = state["price"]
 
@@ -280,10 +287,12 @@ class Simulator:
 
         color = Colors.GREEN if action == "buy" else Colors.RED
         verb = action.upper()
+        h = player_agent.holdings if isinstance(player_agent.holdings, dict) else {}
+        holdings_str = ",".join(f"{sym}:{qty:g}" for sym, qty in h.items()) if h else "0"
         print(colorize(f"\n  Player trade — {verb}", color))
         print(
             f"    Cash: ${player_agent.cash:,.2f}   "
-            f"Holdings: {player_agent.holdings}   "
+            f"Holdings: {holdings_str}   "
             f"Price: ${self.env.price:.2f}"
         )
 
@@ -575,7 +584,11 @@ class Simulator:
             filled = act_info.get("filled_qty", 0)
             reasoning = act_info.get("reasoning", "")
 
-            wealth = agent.cash + agent.holdings * price
+            h = agent.holdings if isinstance(agent.holdings, dict) else {}
+            wealth = agent.cash + sum(
+                h.get(sym, 0) * sm.price
+                for sym, sm in self.env.stocks.items()
+            )
             type_label = agent_type_label(agent)
 
             # Return percentage from initial wealth
@@ -616,9 +629,15 @@ class Simulator:
             action_str = colorize(action_padded, action_color)
             type_str = colorize(f"[{type_label}]", Colors.DIM)
 
+            # Compact holdings summary for multi-stock dicts.
+            if isinstance(h, dict) and h:
+                holdings_str = ",".join(f"{sym}:{qty:g}" for sym, qty in h.items())
+            else:
+                holdings_str = "0"
+
             print(
                 f"  {agent_id:<22} {type_str:<18} {action_str} {detail:<28} "
-                f"| ${agent.cash:>9.0f}  H:{agent.holdings:>6}  W:${wealth:>9.0f}  "
+                f"| ${agent.cash:>9.0f}  H:{holdings_str:<14}  W:${wealth:>9.0f}  "
                 f"R:{ret_str}  d:{delta_str}"
             )
 
@@ -629,10 +648,14 @@ class Simulator:
                     display_reasoning += "..."
                 print(colorize(f"    -> {display_reasoning}", Colors.DIM))
 
-        # --- Round action summary ---
-        buys = sum(1 for a in actions.values() if a.get("action") == "buy")
-        sells = sum(1 for a in actions.values() if a.get("action") == "sell")
-        holds = sum(1 for a in actions.values() if a.get("action") == "hold")
+        # --- Round action summary (per-stock actions nested: {aid: {sym: ...}}) ---
+        stock_acts = [
+            sa for a in actions.values() if isinstance(a, dict)
+            for sa in a.values() if isinstance(sa, dict)
+        ]
+        buys = sum(1 for sa in stock_acts if sa.get("action") == "buy")
+        sells = sum(1 for sa in stock_acts if sa.get("action") == "sell")
+        holds = sum(1 for sa in stock_acts if sa.get("action") == "hold")
         print(
             f"  {colorize(f'{buys} BUY', Colors.GREEN)}  |  "
             f"{colorize(f'{sells} SELL', Colors.RED)}  |  "
@@ -791,14 +814,18 @@ class Simulator:
         print(header)
         print(f"  {'-'*4}  {'-'*22}  {'-'*10}  {'-'*10}  {'-'*10}  {'-'*8}")
 
-        ranked = sorted(
-            agents,
-            key=lambda a: a.cash + a.holdings * env.price,
-            reverse=True,
-        )
+        def _agent_wealth(a) -> float:
+            """Portfolio wealth: cash + sum(holdings * price) across stocks."""
+            h = a.holdings if isinstance(a.holdings, dict) else {}
+            return a.cash + sum(
+                h.get(sym, 0) * sm.price
+                for sym, sm in env.stocks.items()
+            )
+
+        ranked = sorted(agents, key=_agent_wealth, reverse=True)
 
         for rank, agent in enumerate(ranked, 1):
-            wealth = agent.cash + agent.holdings * env.price
+            wealth = _agent_wealth(agent)
             # Use the exact initial wealth captured before trading began.
             # Estimating it from FINAL holdings at the initial price would
             # misstate returns (e.g. an agent that bought high and sold low
@@ -806,17 +833,24 @@ class Simulator:
             initial_wealth = self._initial_wealths.get(agent.agent_id)
             if initial_wealth is None:
                 # Fallback for report() called without run().
-                initial_wealth = agent.cash + agent.holdings * initial_price
+                h = agent.holdings if isinstance(agent.holdings, dict) else {}
+                initial_wealth = agent.cash + sum(
+                    h.get(sym, 0) * initial_price
+                    for sym, sm in env.stocks.items()
+                )
             ret = (wealth / initial_wealth - 1) * 100 if initial_wealth > 0 else 0.0
 
             ret_color = Colors.GREEN if ret >= 0 else Colors.RED
             ret_str = colorize(f"{ret:>7.2f}%", ret_color)
 
+            h = agent.holdings if isinstance(agent.holdings, dict) else {}
+            holdings_str = ",".join(f"{sym}:{qty:g}" for sym, qty in h.items()) if h else "0"
+
             print(
                 f"  {rank:4d}  "
                 f"{agent.agent_id:<22}  "
                 f"${agent.cash:>9.2f}  "
-                f"{agent.holdings:>10d}  "
+                f"{holdings_str:<14}  "
                 f"${wealth:>9.2f}  "
                 f"{ret_str}"
             )

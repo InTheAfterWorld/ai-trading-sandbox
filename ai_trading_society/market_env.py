@@ -2,18 +2,19 @@
 MarketEnv implements the virtual stock market environment.
 
 Core responsibilities:
-1. Collect orders from all agents.
-2. Match buy and sell interest using a simple proportional mechanism.
-3. Update price from net buying pressure.
+1. Collect orders from all agents (per-stock decisions).
+2. Match buy and sell interest using a simple proportional mechanism
+   independently for each stock.
+3. Update each stock's price from net buying pressure.
 4. Record trades and state snapshots.
-5. Trigger market events that affect price and sentiment.
+5. Trigger market events that affect price and sentiment (global).
 """
 
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import ModuleType
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from .base_agent import BaseAgent
 from .config import MarketConfig
@@ -30,17 +31,44 @@ class TradeRecord:
     quantity: int
     price: float
     cash_change: float  # Negative for buyers, positive for sellers.
+    name: str = ""
+    """Stock name this trade was executed on."""
+
+    @property
+    def symbol(self) -> str:
+        """Backward-compatibility alias returning name."""
+        return self.name
+
+
+@dataclass
+class StockMarket:
+    """Per-stock market state: price, history, and volume.
+
+    Each stock in a multi-stock environment maintains its own independent
+    price series, trade volume, and order book for the current step.
+    """
+
+    name: str
+    initial_price: float
+    price: float
+    price_history: List[float] = field(default_factory=list)
+    volume_history: List[int] = field(default_factory=list)
+
+    @property
+    def symbol(self) -> str:
+        """Backward-compatibility alias returning name."""
+        return self.name
 
 
 class MarketEnv:
     """
-    Virtual stock market environment.
+    Virtual stock market environment supporting multiple stocks.
 
     Per-step workflow:
-    1. Generate an observation for each agent.
-    2. Call Agent.act(observation) to collect orders.
-    3. Match buy and sell orders proportionally.
-    4. Update price from net buying pressure.
+    1. Generate an observation for each agent (aggregated multi-stock data).
+    2. Call Agent.act(observation) to collect per-stock orders.
+    3. Match buy and sell orders proportionally for each stock independently.
+    4. Update each stock's price from net buying pressure.
     5. Record the resulting state.
 
     Parameters
@@ -53,20 +81,14 @@ class MarketEnv:
 
     def __init__(self, config: MarketConfig, agents: List[BaseAgent], seed: int | None = None):
         self.config = config
-        # RNG injected for reproducibility. An explicit seed argument wins;
-        # otherwise fall back to config.seed so a seeded MarketConfig yields a
-        # reproducible environment even when MarketEnv is constructed directly.
-        # If both are None, use the global random module so external calls to
-        # random.seed() still control behavior (helps tests that seed the
-        # global RNG).
+        # RNG injected for reproducibility.
         if seed is None and config.seed is not None:
             seed = config.seed
         self.rng: Union[random.Random, ModuleType] = (
             random.Random(seed) if seed is not None else random
         )
 
-        # Reject duplicate agent IDs up front: a dict comprehension would
-        # silently overwrite the earlier agent, dropping it from the run.
+        # Reject duplicate agent IDs up front.
         seen: set = set()
         for a in agents:
             if a.agent_id in seen:
@@ -74,7 +96,7 @@ class MarketEnv:
             seen.add(a.agent_id)
         self.agents: Dict[str, BaseAgent] = {a.agent_id: a for a in agents}
 
-        # Inject RNG into agents (and into wrapped base_agent if present)
+        # Inject RNG into agents
         for a in agents:
             try:
                 setattr(a, "rng", self.rng)
@@ -86,44 +108,171 @@ class MarketEnv:
                 except Exception:
                     pass
 
-        # --- Market state ---
-        self.price: float = config.initial_price
+        # --- Multi-stock market state ---
+        stock_specs = config.get_stock_specs()
+        self.stocks: Dict[str, StockMarket] = {}
+        for spec in stock_specs:
+            self.stocks[spec.name] = StockMarket(
+                name=spec.name,
+                initial_price=spec.initial_price,
+                price=spec.initial_price,
+                price_history=[spec.initial_price],
+                volume_history=[],
+            )
+
+        # Initialize each agent's holdings dict.
+        first_name = stock_specs[0].name if stock_specs else "Stock 1"
+        for a in agents:
+            if not isinstance(a.holdings, dict):
+                a.holdings = {}
+            # Remap legacy int holdings ("_legacy" key) to the first stock.
+            legacy = a.holdings.pop("_legacy", 0.0)
+            if legacy:
+                a.holdings[first_name] = a.holdings.get(first_name, 0.0) + legacy
+            # Ensure every stock has an entry (default 0 or config value).
+            for spec in stock_specs:
+                if spec.symbol in a.holdings and spec.name not in a.holdings:
+                    a.holdings[spec.name] = a.holdings.pop(spec.symbol)
+                if spec.name not in a.holdings:
+                    a.holdings[spec.name] = float(spec.initial_holdings)
+
         self.step_count: int = 0
-        self.price_history: List[float] = [config.initial_price]
         self.trade_history: List[TradeRecord] = []
-        self.volume_history: List[int] = []
         self._agent_error_counts: Dict[str, int] = {}
 
-        # --- Event system (always active in the unified sandbox) ---
+        # --- Event system ---
         self.event_manager: EventManager = EventManager(
             event_probability_multiplier=config.event_probability_multiplier,
             rng=self.rng,
         )
 
         # --- Social influence ---
-        # social_map: agent_id -> {"idol": str|None, "friends": [...], "enemies": [...]}
-        # Set after construction (web/CLI) via resolve_social_map().
         self.social_map: Dict[str, dict] = {}
-        # Last round's resolved actions per agent, fed into next-round
-        # observations so peers can react to each other (herding).
         self._recent_actions: Dict[str, dict] = {}
-        # Runtime influence strength override (set via God Mode); falls back
-        # to config.social_influence when None.
         self._social_influence: Optional[float] = None
 
-    def set_player_action(self, action: str, quantity: int):
-        """Buffer the human player's action for the current step.
+        # --- Player action buffer ---
+        self._pending_player_actions: Dict[str, dict] = {}
 
-        Called by the web API before env.step() so the player agent
-        can read it during the order-collection phase.
-        """
-        self._pending_player_action = {"action": action, "quantity": quantity}
+    # ------------------------------------------------------------------
+    # Backward-compat properties (delegate to first stock)
+    # ------------------------------------------------------------------
+
+    @property
+    def price(self) -> float:
+        """Return the primary (first) stock's price for backward compat."""
+        if self.stocks:
+            return next(iter(self.stocks.values())).price
+        return self.config.initial_price
+
+    @price.setter
+    def price(self, value: float) -> None:
+        """Set the primary stock's price (backward compat)."""
+        if self.stocks:
+            first_key = next(iter(self.stocks.keys()))
+            self.stocks[first_key].price = value
+
+    @property
+    def price_history(self) -> List[float]:
+        """Return the primary stock's price history for backward compat."""
+        if self.stocks:
+            return next(iter(self.stocks.values())).price_history
+        return []
+
+    @property
+    def volume_history(self) -> List[int]:
+        """Return the primary stock's volume history for backward compat."""
+        if self.stocks:
+            return next(iter(self.stocks.values())).volume_history
+        return []
+
+    def set_player_action(self, action: str, quantity: int, symbol: Optional[str] = None):
+        """Buffer the human player's action for the current step."""
+        if symbol is None:
+            if self.stocks:
+                symbol = next(iter(self.stocks.keys()))
+            else:
+                symbol = "Stock 1"
+        self._pending_player_actions[symbol] = {"action": action, "quantity": quantity}
 
     def pop_player_action(self):
-        """Return and clear the buffered player action, or None."""
-        action = getattr(self, "_pending_player_action", None)
-        self._pending_player_action = None
-        return action
+        """Return and clear the first buffered player action, or None."""
+        if self._pending_player_actions:
+            sym = next(iter(self._pending_player_actions.keys()))
+            return self._pending_player_actions.pop(sym)
+        return None
+
+    def pop_player_actions(self) -> Dict[str, dict]:
+        """Return and clear all buffered player actions as a dict."""
+        actions = dict(self._pending_player_actions)
+        self._pending_player_actions = {}
+        return actions
+
+    # ------------------------------------------------------------------
+    # Decision parsing (multi-stock + legacy compat)
+    # ------------------------------------------------------------------
+
+    def _parse_decisions(
+        self, action: Dict[str, Any], stock_symbols: List[str]
+    ) -> List[Dict[str, Any]]:
+        """Parse an agent's action into a list of per-stock decisions.
+
+        Supports two formats:
+        - Multi-stock: ``{"decisions": [{"name", "action", "quantity",
+          "reasoning"}, ...]}``
+        - Legacy single-stock: ``{"action", "quantity", "reasoning"}`` —
+          applied to the first stock.
+        """
+        if "decisions" in action:
+            raw_decisions = action["decisions"]
+            if not isinstance(raw_decisions, list):
+                raise ValueError("'decisions' must be a list")
+            result: List[Dict[str, Any]] = []
+            for d in raw_decisions:
+                if not isinstance(d, dict):
+                    continue
+                stk_name = str(d.get("name") or d.get("symbol") or "")
+                act = str(d.get("action", "hold")).lower()
+                if act not in ("buy", "sell", "hold"):
+                    raise ValueError(f"invalid action: {act!r}")
+                qty = max(0, int(d.get("quantity", 0)))
+                result.append({
+                    "name": stk_name,
+                    "symbol": stk_name,
+                    "action": act,
+                    "quantity": qty,
+                    "reasoning": str(d.get("reasoning", "")),
+                    "error": bool(d.get("error", False)),
+                })
+            # Fill in missing stocks with hold.
+            covered = {d["name"] for d in result}
+            for sym in stock_symbols:
+                if sym not in covered:
+                    result.append({
+                        "name": sym,
+                        "symbol": sym,
+                        "action": "hold",
+                        "quantity": 0,
+                        "reasoning": "",
+                        "error": False,
+                    })
+            return result
+
+        # Legacy single-stock format.
+        act = str(action.get("action", "hold")).lower()
+        if act not in ("buy", "sell", "hold"):
+            raise ValueError(f"invalid action: {act!r}")
+        qty = max(0, int(action.get("quantity", 0)))
+        reasoning = str(action.get("reasoning", ""))
+        error = bool(action.get("error", False))
+        first_sym = stock_symbols[0] if stock_symbols else "Stock 1"
+        return [
+            {"name": sym, "symbol": sym, "action": "hold" if sym != first_sym else act,
+             "quantity": qty if sym == first_sym else 0,
+             "reasoning": reasoning if sym == first_sym else "",
+             "error": error}
+            for sym in stock_symbols
+        ]
 
     # ------------------------------------------------------------------
     # Observation generation
@@ -137,18 +286,42 @@ class MarketEnv:
         black-box setup: agents cannot inspect each other's internal state.
         """
         agent = self.agents[agent_id]
-        hist_len = min(len(self.price_history), self.config.price_history_length)
+
+        # Build per-stock data.
+        stocks_data: List[Dict[str, Any]] = []
+        total_holdings_value = 0.0
+        for sym, sm in self.stocks.items():
+            h = agent.holdings.get(sym, 0) if isinstance(agent.holdings, dict) else 0
+            hist_len = min(len(sm.price_history), self.config.price_history_length)
+            stocks_data.append({
+                "symbol": sym,
+                "name": sm.name,
+                "price": sm.price,
+                "price_history": sm.price_history[-hist_len:],
+                "last_volume": sm.volume_history[-1] if sm.volume_history else 0,
+                "my_holdings": h,
+            })
+            total_holdings_value += h * sm.price
+
+        total_holdings = sum(agent.holdings.values()) if isinstance(agent.holdings, dict) else 0
+        my_wealth = agent.cash + total_holdings_value
 
         obs: Dict[str, Any] = {
             "step": self.step_count,
-            "price": self.price,
-            "price_history": self.price_history[-hist_len:],
+            "stocks": stocks_data,
             "my_cash": agent.cash,
-            "my_holdings": agent.holdings,
-            "my_wealth": agent.cash + agent.holdings * self.price,
-            "last_volume": self.volume_history[-1] if self.volume_history else 0,
+            "my_holdings": agent.holdings if isinstance(agent.holdings, dict) else {},
+            "my_total_holdings": total_holdings,
+            "my_wealth": my_wealth,
             "market_sentiment": 0.0,
         }
+
+        # Backward-compat: expose first stock's data as top-level fields.
+        if stocks_data:
+            first = stocks_data[0]
+            obs["price"] = first["price"]
+            obs["price_history"] = first["price_history"]
+            obs["last_volume"] = first["last_volume"]
 
         # Add active event information.
         if self.event_manager:
@@ -205,7 +378,7 @@ class MarketEnv:
         """Run one simulation step."""
         self.step_count += 1
 
-        # ---------- 0. Event system ----------
+        # ---------- 0. Event system (global) ----------
         triggered_events: list = []
         if self.event_manager:
             # Tick existing events
@@ -213,10 +386,15 @@ class MarketEnv:
             # Try to trigger new events (may return multiple)
             triggered_events = self.event_manager.try_trigger_event(self.step_count)
 
-        # ---------- 1. Collect orders ----------
-        buy_orders: List[tuple] = []   # (agent_id, quantity)
-        sell_orders: List[tuple] = []  # (agent_id, quantity)
-        agent_actions: Dict[str, Dict[str, Any]] = {}
+        stock_symbols = list(self.stocks.keys())
+
+        # ---------- 1. Collect orders per stock ----------
+        buy_orders: Dict[str, List[Tuple[str, int]]] = {sym: [] for sym in stock_symbols}
+        sell_orders: Dict[str, List[Tuple[str, int]]] = {sym: [] for sym in stock_symbols}
+        # agent_actions[aid][sym] = {action, requested_qty, filled_qty, reasoning, error}
+        agent_actions: Dict[str, Dict[str, dict]] = {
+            aid: {} for aid in self.agents
+        }
 
         for agent_id, agent in self.agents.items():
             obs = self.get_observation(agent_id)
@@ -224,11 +402,7 @@ class MarketEnv:
                 action = agent.act(obs)
                 if not isinstance(action, dict):
                     raise ValueError("agent action must be a dictionary")
-                action_type = action.get("action", "hold")
-                if action_type not in ("buy", "sell", "hold"):
-                    raise ValueError("agent action must be buy, sell, or hold")
-                quantity = max(0, int(action.get("quantity", 0)))
-                reasoning = str(action.get("reasoning", ""))
+                decisions = self._parse_decisions(action, stock_symbols)
             except Exception as exc:
                 count = self._agent_error_counts.get(agent_id, 0) + 1
                 self._agent_error_counts[agent_id] = count
@@ -237,109 +411,141 @@ class MarketEnv:
                         f"[WARN] Agent '{agent_id}' failed to act: "
                         f"{type(exc).__name__}: {exc}. Recording an AI failure."
                     )
-                action = {
-                    "action": "hold",
-                    "quantity": 0,
-                    "reasoning": f"AI acquisition failed: {type(exc).__name__}: {exc}",
-                    "error": True,
-                }
-                action_type = "hold"
-                quantity = 0
-                reasoning = action["reasoning"]
+                decisions = [
+                    {
+                        "symbol": sym,
+                        "action": "hold",
+                        "quantity": 0,
+                        "reasoning": f"AI acquisition failed: {type(exc).__name__}: {exc}",
+                        "error": True,
+                    }
+                    for sym in stock_symbols
+                ]
 
-            # Record the agent's raw decision for this round.
-            agent_actions[agent_id] = {
-                "action": action_type,
-                "requested_qty": quantity,
-                "filled_qty": 0,
-                "reasoning": reasoning,
-                "error": bool(action.get("error", False)),
+            for d in decisions:
+                sym = d["symbol"]
+                if sym not in self.stocks:
+                    continue  # ignore unknown symbols
+                action_type = d["action"]
+                quantity = d["quantity"]
+                reasoning = d.get("reasoning", "")
+                error = d.get("error", False)
+
+                agent_actions[agent_id][sym] = {
+                    "action": action_type,
+                    "requested_qty": quantity,
+                    "filled_qty": 0,
+                    "reasoning": reasoning,
+                    "error": error,
+                }
+
+                sm = self.stocks[sym]
+                if action_type == "buy" and quantity > 0:
+                    # Clip quantity to the maximum affordable amount.
+                    effective_price = sm.price * (
+                        1.0 + self.config.slippage_rate
+                    ) * (1.0 + self.config.fee_rate)
+                    if sm.price > 0 and agent.cash > 0 and effective_price > 0:
+                        max_afford = math.floor(agent.cash / effective_price + 1e-9)
+                    else:
+                        max_afford = 0
+                    quantity = min(quantity, max_afford)
+                    if quantity > 0:
+                        buy_orders[sym].append((agent_id, quantity))
+
+                elif action_type == "sell" and quantity > 0:
+                    # Clip quantity to current holdings of this stock.
+                    h = agent.holdings.get(sym, 0) if isinstance(agent.holdings, dict) else 0
+                    quantity = min(quantity, int(h))
+                    if quantity > 0:
+                        sell_orders[sym].append((agent_id, quantity))
+
+        # ---------- 2. Match orders per stock ----------
+        per_stock_totals: Dict[str, dict] = {}
+        for sym, sm in self.stocks.items():
+            buys = buy_orders[sym]
+            sells = sell_orders[sym]
+            total_buy = sum(q for _, q in buys)
+            total_sell = sum(q for _, q in sells)
+            matched_volume = min(total_buy, total_sell)
+            sm.volume_history.append(matched_volume)
+            per_stock_totals[sym] = {
+                "total_buy": total_buy,
+                "total_sell": total_sell,
+                "matched": matched_volume,
             }
 
-            if action_type == "buy" and quantity > 0:
-                # Clip quantity to the maximum affordable amount. Account for
-                # slippage and fees so a full-size buy can never push cash
-                # below zero (negative cash would silently cancel all of the
-                # agent's future buy orders).
-                effective_price = self.price * (
-                    1.0 + self.config.slippage_rate
-                ) * (1.0 + self.config.fee_rate)
-                if self.price > 0 and agent.cash > 0 and effective_price > 0:
-                    max_afford = math.floor(agent.cash / effective_price + 1e-9)
-                else:
-                    max_afford = 0
-                quantity = min(quantity, max_afford)
-                if quantity > 0:
-                    buy_orders.append((agent_id, quantity))
-
-            elif action_type == "sell" and quantity > 0:
-                # Clip quantity to current holdings.
-                quantity = min(quantity, agent.holdings)
-                if quantity > 0:
-                    sell_orders.append((agent_id, quantity))
-
-        # ---------- 2. Match orders ----------
-        total_buy = sum(q for _, q in buy_orders)
-        total_sell = sum(q for _, q in sell_orders)
-        matched_volume = min(total_buy, total_sell)
-        self.volume_history.append(matched_volume)
-
-        if matched_volume > 0:
-            self._match_orders(buy_orders, sell_orders, total_buy, total_sell)
+            if matched_volume > 0:
+                self._match_orders(sym, buys, sells, total_buy, total_sell)
 
         # Update filled quantities from executed trades this step.
         for trade in self.trade_history:
-            if trade.step == self.step_count:
-                agent_actions[trade.agent_id]["filled_qty"] += trade.quantity
+            if trade.step == self.step_count and trade.symbol:
+                aid = trade.agent_id
+                sym = trade.symbol
+                if sym in agent_actions.get(aid, {}):
+                    agent_actions[aid][sym]["filled_qty"] += trade.quantity
 
-        # Snapshot this round's resolved actions so next round's observations
-        # can feed them to social peers (herding / contrarian behavior).
-        self._recent_actions = {
-            aid: {
-                "action": info.get("action", "hold"),
-                "filled": int(info.get("filled_qty", 0)),
+        # Snapshot this round's resolved actions (aggregated for social).
+        self._recent_actions = {}
+        for aid, stock_acts in agent_actions.items():
+            total_filled = sum(
+                sa.get("filled_qty", 0) for sa in stock_acts.values()
+            )
+            # Dominant action = the one with most filled quantity.
+            dominant_action = "hold"
+            max_filled = 0
+            for sa in stock_acts.values():
+                f = sa.get("filled_qty", 0)
+                if f > max_filled:
+                    max_filled = f
+                    dominant_action = sa.get("action", "hold")
+            self._recent_actions[aid] = {
+                "action": dominant_action,
+                "filled": total_filled,
             }
-            for aid, info in agent_actions.items()
-        }
 
-        # ---------- 3. Update price from net buying pressure and mean reversion ----------
-        total_volume = total_buy + total_sell
-        if total_volume > 0:
-            net_pressure = (total_buy - total_sell) / total_volume
-        else:
-            net_pressure = 0.0
+        # ---------- 3. Update price per stock ----------
+        for sym, sm in self.stocks.items():
+            totals = per_stock_totals[sym]
+            total_buy = totals["total_buy"]
+            total_sell = totals["total_sell"]
+            total_volume = total_buy + total_sell
+            if total_volume > 0:
+                net_pressure = (total_buy - total_sell) / total_volume
+            else:
+                net_pressure = 0.0
 
-        price_change_ratio = self.config.price_sensitivity * net_pressure
+            price_change_ratio = self.config.price_sensitivity * net_pressure
 
-        # Mean reversion: the farther price moves from its initial level,
-        # the stronger the pullback force becomes.
-        deviation = (self.price - self.config.initial_price) / max(self.config.initial_price, 0.01)
-        mean_reversion = -0.0005 * deviation
-        price_change_ratio += mean_reversion
+            # Mean reversion: pull toward initial price.
+            deviation = (sm.price - sm.initial_price) / max(sm.initial_price, 0.01)
+            mean_reversion = -0.0005 * deviation
+            price_change_ratio += mean_reversion
 
-        # Apply event-driven price impact.
-        if self.event_manager:
-            event_effects = self.event_manager.get_combined_effects()
-            price_change_ratio += event_effects.get("price_impact", 0.0)
+            # Apply event-driven price impact (global, affects all stocks).
+            if self.event_manager:
+                event_effects = self.event_manager.get_combined_effects()
+                price_change_ratio += event_effects.get("price_impact", 0.0)
 
-        # Add small noise when no shares are matched, simulating market hesitation.
-        if matched_volume == 0:
-            price_change_ratio += self.rng.uniform(-0.003, 0.003)
+            # Add small noise when no shares are matched.
+            if totals["matched"] == 0:
+                price_change_ratio += self.rng.uniform(-0.003, 0.003)
 
-        # Clamp single-step price movement.
-        price_change_ratio = max(
-            -self.config.max_price_change_ratio,
-            min(self.config.max_price_change_ratio, price_change_ratio),
-        )
+            # Clamp single-step price movement.
+            price_change_ratio = max(
+                -self.config.max_price_change_ratio,
+                min(self.config.max_price_change_ratio, price_change_ratio),
+            )
 
-        self.price *= (1.0 + price_change_ratio)
-        self.price = max(
-            self.config.min_price,
-            min(self.config.max_price, self.price),
-        )
-        self.price_history.append(self.price)
+            sm.price *= (1.0 + price_change_ratio)
+            sm.price = max(
+                self.config.min_price,
+                min(self.config.max_price, sm.price),
+            )
+            sm.price_history.append(sm.price)
 
-        state = self._get_state(agent_actions)
+        state = self._get_state(agent_actions, per_stock_totals)
 
         # Add all triggered events info to state for logging
         if triggered_events:
@@ -353,10 +559,6 @@ class MarketEnv:
                 for e in triggered_events
             ]
 
-        # Add market pressure data for display
-        state["total_buy"] = total_buy
-        state["total_sell"] = total_sell
-
         # Add active event details for display.
         if self.event_manager:
             state["active_events_detail"] = self.event_manager.get_active_events_detail()
@@ -364,18 +566,19 @@ class MarketEnv:
         return state
 
     # ------------------------------------------------------------------
-    # Matching engine
+    # Matching engine (per-stock)
     # ------------------------------------------------------------------
 
     def _match_orders(
         self,
+        symbol: str,
         buy_orders: List[tuple],
         sell_orders: List[tuple],
         total_buy: int,
         total_sell: int,
     ):
         """
-        Match buy and sell interest proportionally.
+        Match buy and sell interest proportionally for a single stock.
 
         Rules:
         - If buy demand >= sell supply: all sellers fill, buyers fill proportionally.
@@ -384,13 +587,10 @@ class MarketEnv:
         """
         if total_buy >= total_sell:
             # Sellers fully fill; buyers fill proportionally.
-            # Sellers get full fills.
             for agent_id, qty in sell_orders:
                 if qty > 0:
-                    self._execute_trade(agent_id, "sell", qty)
+                    self._execute_trade(symbol, agent_id, "sell", qty)
 
-            # Buyers receive proportional fills. Use floor allocation then
-            # distribute remaining residuals by largest fractional part.
             fill_ratio = total_sell / max(total_buy, 1)
             ideal = [(agent_id, qty * fill_ratio, qty) for agent_id, qty in buy_orders]
             floors = [(aid, int(math.floor(val)), val - math.floor(val), orig)
@@ -400,7 +600,6 @@ class MarketEnv:
             remaining = total_sell - filled_total
 
             if remaining > 0:
-                # Sort by fractional part desc, break ties by original qty desc
                 frac_list = sorted(
                     [(aid, frac, orig) for aid, _, frac, orig in floors],
                     key=lambda x: (x[1], x[2]),
@@ -409,22 +608,20 @@ class MarketEnv:
                 idx = 0
                 while remaining > 0 and idx < len(frac_list):
                     aid, _, orig = frac_list[idx]
-                    # Don't allocate more than originally requested
                     if allocated[aid] < orig:
                         allocated[aid] += 1
                         remaining -= 1
                     idx += 1
 
-            # Execute buyer trades
             for aid, qty in allocated.items():
                 if qty > 0:
-                    self._execute_trade(aid, "buy", qty)
+                    self._execute_trade(symbol, aid, "buy", qty)
 
         else:
             # Buyers fully fill; sellers fill proportionally.
             for agent_id, qty in buy_orders:
                 if qty > 0:
-                    self._execute_trade(agent_id, "buy", qty)
+                    self._execute_trade(symbol, agent_id, "buy", qty)
 
             fill_ratio = total_buy / max(total_sell, 1)
             ideal = [(agent_id, qty * fill_ratio, qty) for agent_id, qty in sell_orders]
@@ -450,25 +647,26 @@ class MarketEnv:
 
             for aid, qty in allocated.items():
                 if qty > 0:
-                    self._execute_trade(aid, "sell", qty)
+                    self._execute_trade(symbol, aid, "sell", qty)
 
-    def _execute_trade(self, agent_id: str, action: str, quantity: int):
-        """Execute one trade and update agent cash and holdings.
+    def _execute_trade(self, symbol: str, agent_id: str, action: str, quantity: int):
+        """Execute one trade and update agent cash and holdings for a stock.
 
         Transaction costs (fee_rate and slippage_rate) are applied when
         configured. Slippage shifts the execution price against the trader:
         buyers pay more, sellers receive less.
         """
         agent = self.agents[agent_id]
+        sm = self.stocks[symbol]
 
-        # Apply slippage to execution price (buyers pay up, sellers receive down).
+        # Apply slippage to execution price.
         if self.config.slippage_rate > 0:
             if action == "buy":
-                trade_price = self.price * (1.0 + self.config.slippage_rate)
+                trade_price = sm.price * (1.0 + self.config.slippage_rate)
             else:
-                trade_price = self.price * (1.0 - self.config.slippage_rate)
+                trade_price = sm.price * (1.0 - self.config.slippage_rate)
         else:
-            trade_price = self.price
+            trade_price = sm.price
 
         trade_value = quantity * trade_price
         fee = trade_value * self.config.fee_rate if self.config.fee_rate > 0 else 0.0
@@ -476,12 +674,16 @@ class MarketEnv:
         if action == "buy":
             cost = trade_value + fee
             agent.cash -= cost
-            agent.holdings += quantity
+            if not isinstance(agent.holdings, dict):
+                agent.holdings = {}
+            agent.holdings[symbol] = agent.holdings.get(symbol, 0) + quantity
             cash_change = -cost
         else:  # sell
             revenue = trade_value - fee
             agent.cash += revenue
-            agent.holdings -= quantity
+            if not isinstance(agent.holdings, dict):
+                agent.holdings = {}
+            agent.holdings[symbol] = agent.holdings.get(symbol, 0) - quantity
             cash_change = revenue
 
         self.trade_history.append(TradeRecord(
@@ -491,6 +693,7 @@ class MarketEnv:
             quantity=quantity,
             price=trade_price,
             cash_change=cash_change,
+            name=symbol,
         ))
 
     # ------------------------------------------------------------------
@@ -498,16 +701,38 @@ class MarketEnv:
     # ------------------------------------------------------------------
 
     def _get_state(
-        self, agent_actions: Optional[Dict[str, Dict[str, Any]]] = None
+        self,
+        agent_actions: Optional[Dict[str, Dict[str, dict]]] = None,
+        per_stock_totals: Optional[Dict[str, dict]] = None,
     ) -> Dict[str, Any]:
-        return {
+        """Build a state snapshot with multi-stock data.
+
+        The ``agent_actions`` dict is nested: ``{aid: {sym: {action, ...}}}``.
+        """
+        per_stock_totals = per_stock_totals or {}
+        state: Dict[str, Any] = {
             "step": self.step_count,
-            "price": self.price,
+            "price": self.price,  # backward compat (first stock)
+            "stocks": {
+                sym: {
+                    "price": sm.price,
+                    "name": sm.name,
+                    "price_history": list(sm.price_history),
+                    "volume": sm.volume_history[-1] if sm.volume_history else 0,
+                    "total_buy": per_stock_totals.get(sym, {}).get("total_buy", 0),
+                    "total_sell": per_stock_totals.get(sym, {}).get("total_sell", 0),
+                }
+                for sym, sm in self.stocks.items()
+            },
             "agents": {
                 aid: {
                     "cash": a.cash,
-                    "holdings": a.holdings,
-                    "wealth": a.cash + a.holdings * self.price,
+                    "holdings": dict(a.holdings) if isinstance(a.holdings, dict) else {},
+                    "wealth": a.cash + sum(
+                        h * self.stocks[s].price
+                        for s, h in (a.holdings.items() if isinstance(a.holdings, dict) else [])
+                        if s in self.stocks
+                    ),
                 }
                 for aid, a in self.agents.items()
             },
@@ -516,3 +741,4 @@ class MarketEnv:
             ),
             "agent_actions": agent_actions or {},
         }
+        return state

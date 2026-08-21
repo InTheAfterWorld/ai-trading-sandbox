@@ -4,9 +4,10 @@ Unified Agent Roster Factory.
 Centralizes the creation and setup of trading agents for both Web UI and CLI modes.
 """
 
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..base_agent import BaseAgent
+from ..config import StockSpec
 from .external_ai_agent import _DEFAULT_MODELS, ExternalAIAgent
 from .player_agent import PlayerAgent
 from .traits import create_personality_agent
@@ -141,6 +142,19 @@ def _agent_personality(agent) -> str:
     return getattr(agent, "personality_name", "") or ""
 
 
+def _build_holdings_dict(
+    stocks: Optional[List[StockSpec]], holdings: int
+) -> Dict[str, float]:
+    """Build a per-stock holdings dict from the stock specs.
+
+    When ``stocks`` is None or empty, returns an empty dict so MarketEnv
+    falls back to its legacy single-stock migration path.
+    """
+    if not stocks:
+        return {}
+    return {spec.name: float(holdings) for spec in stocks}
+
+
 def build_agent_roster(
     provider: str = "openai",
     model: str = "gpt-4o",
@@ -148,6 +162,7 @@ def build_agent_roster(
     trader_configs: Optional[List[dict]] = None,
     cash: float = 10000.0,
     holdings: int = 20,
+    stocks: Optional[List[StockSpec]] = None,
 ) -> Tuple[List[BaseAgent], PlayerAgent]:
     """
     Build and return the list of participating agents for a market simulation run.
@@ -164,7 +179,11 @@ def build_agent_roster(
     cash : float
         Starting cash balance for every trader and the player.
     holdings : int
-        Starting share holdings for every trader and the player.
+        Starting share holdings per stock for every trader and the player.
+    stocks : list of StockSpec, optional
+        Stock specifications. When provided, each agent's holdings is
+        initialized as a ``{symbol: holdings}`` dict. When None, holdings
+        stays as a legacy int that MarketEnv migrates to the first stock.
     Returns
     -------
     agents : list of BaseAgent
@@ -172,6 +191,7 @@ def build_agent_roster(
     player_agent : PlayerAgent
         Reference to the player agent, which may trade or simply observe.
     """
+    holdings_dict = _build_holdings_dict(stocks, holdings)
     agents: List[BaseAgent] = []
     # Only fall back to the default roster when no trader list was provided
     # at all (None). An explicit empty list [] means "no AI traders" and must
@@ -206,7 +226,7 @@ def build_agent_roster(
         base = ExternalAIAgent(
             trader_name,
             cash=cash,
-            holdings=holdings,
+            holdings=holdings_dict,
             api_provider=trader_provider,
             model=trader_model,
             api_key=trader_key or None,
@@ -215,7 +235,9 @@ def build_agent_roster(
         trait_agent = create_personality_agent(base, personality=personality)
         agents.append(trait_agent)
 
-    player_agent = PlayerAgent(agent_id="Player (You)", cash=cash, holdings=holdings)
+    player_agent = PlayerAgent(
+        agent_id="Player (You)", cash=cash, holdings=holdings_dict
+    )
     agents.append(player_agent)
 
     return agents, player_agent

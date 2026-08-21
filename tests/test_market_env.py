@@ -72,9 +72,10 @@ class TestOrderMatching:
     def test_seller_holdings_decrease_after_sell(self, simple_env):
         """Seller's holdings should decrease after a successful sell."""
         seller = simple_env.agents["seller"]
-        initial_holdings = seller.holdings
+        initial_holdings = sum(seller.holdings.values())
         simple_env.step()
-        assert seller.holdings < initial_holdings, "Seller holdings should decrease"
+        current_holdings = sum(seller.holdings.values())
+        assert current_holdings < initial_holdings, "Seller holdings should decrease"
 
     def test_trade_history_records_trades(self, simple_env):
         """Trade history should contain records after a step."""
@@ -186,19 +187,22 @@ class TestStateSnapshot:
         assert "step" in state
 
     def test_state_contains_market_pressure(self, simple_env):
-        """State should contain total_buy and total_sell."""
+        """State should contain total_buy and total_sell per stock."""
         state = simple_env.step()
-        assert "total_buy" in state
-        assert "total_sell" in state
-        assert state["total_buy"] > 0
-        assert state["total_sell"] > 0
+        assert "stocks" in state
+        first_stock = next(iter(state["stocks"].values()))
+        assert "total_buy" in first_stock
+        assert "total_sell" in first_stock
+        assert first_stock["total_buy"] > 0
+        assert first_stock["total_sell"] > 0
 
     def test_agent_actions_contain_reasoning_key(self, simple_env):
         """agent_actions should contain a reasoning key (empty for non-AI agents)."""
         state = simple_env.step()
         actions = state.get("agent_actions", {})
-        for agent_id, act_info in actions.items():
-            assert "reasoning" in act_info
+        for agent_id, stock_actions in actions.items():
+            for sym, act_info in stock_actions.items():
+                assert "reasoning" in act_info
 
     def test_sandbox_has_active_events_detail(self, simple_env):
         """Unified sandbox state always includes active event details."""

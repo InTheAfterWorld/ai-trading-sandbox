@@ -1,5 +1,5 @@
 """
-AI Trading Society.
+AI Trading Sandbox.
 
 An extensible multi-agent simulation framework for observing how different
 AI decision makers behave in a virtual stock market.

@@ -3,7 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>AI Trading Society</title>
+<title>AI TRADING SANDBOX</title>
+<link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
 <style>
 :root{
   --bg:#0b0e14;--bg-secondary:#111827;--card:#161b2a;--card-hover:#1d2335;
@@ -179,7 +180,7 @@ input[type="range"]:focus{outline:none;}
   <div class="home">
     <!-- Left: hero -->
     <div class="hero">
-      <div class="logo-badge">ATS</div>
+      <div class="logo-badge"><img src="{{ url_for('static', filename='logo.png') }}" alt="ATS Logo" style="width:36px;height:36px;object-fit:contain;"></div>
       <h1>AI Trading<br><span class="grad">Society</span></h1>
       <p>Watch autonomous AI agents analyze, react, and trade in a simulated market. Configure your simulation and dive in.</p>
       <div class="hero-points">
@@ -209,8 +210,7 @@ input[type="range"]:focus{outline:none;}
       <div class="field-group">
         <div class="group-label"><span class="gicon">SIM</span>Simulation</div>
         <div class="field-grid">
-          <div class="field"><label>Rounds</label><input type="number" id="homeStepsInput" value="30" min="1" max="200" oninput="autoSaveConfig()"></div>
-          <div class="field"><label>Start Price</label><input type="number" id="homePriceInput" value="100" min="1" oninput="autoSaveConfig()"></div>
+          <div class="field" style="grid-column:1/-1;"><label>Rounds</label><input type="number" id="homeStepsInput" value="30" min="1" max="200" oninput="autoSaveConfig()"></div>
         </div>
         <div class="field-grid" style="margin-top:14px;">
           <div class="field" style="grid-column:1/-1;">
@@ -231,6 +231,12 @@ input[type="range"]:focus{outline:none;}
         <div class="field-grid" style="margin-top:14px;">
           <div class="field"><label>Fee Rate</label><input type="number" id="homeFeeInput" value="0.001" step="0.001" oninput="autoSaveConfig()"></div>
           <div class="field"><label>Slippage</label><input type="number" id="homeSlipInput" value="0.001" step="0.001" oninput="autoSaveConfig()"></div>
+        </div>
+        <div class="field-grid" style="margin-top:14px;">
+          <div class="field" style="grid-column:1/-1;">
+            <button class="configure-btn" onclick="openStockConfig()">Configure Stocks</button>
+            <div id="stockSummary" style="font-size:11px;color:var(--text-dim);margin-top:10px;text-align:center;"></div>
+          </div>
         </div>
       </div>
 
@@ -260,6 +266,15 @@ input[type="range"]:focus{outline:none;}
   </div>
 </div>
 
+<div class="trader-config" id="stockConfig">
+  <div class="config-dialog">
+    <div class="config-dialog-head"><div><h2>Configure Stocks</h2><div class="step-sub" style="margin:5px 0 0;">Add multiple stocks. Each has its own name, initial price, and per-agent holdings.</div></div><button class="close-config" onclick="closeStockConfig()" aria-label="Close">×</button></div>
+    <button class="add-trader" onclick="addStock()">＋ Add stock</button>
+    <div id="stockRows"></div>
+    <div class="config-actions"><button class="configure-btn" style="width:auto" onclick="closeStockConfig()">Cancel</button><button class="save-config" onclick="saveStockConfig()">Save configuration</button></div>
+  </div>
+</div>
+
 <script>
 async function loadConfig(){
   try{
@@ -286,7 +301,6 @@ async function loadConfig(){
     }
 
     if(c.steps)setVal('homeStepsInput',c.steps);
-    if(c.price)setVal('homePriceInput',c.price);
     if(c.cash)setVal('homeCashInput',c.cash);
     if(c.hold)setVal('homeHoldInput',c.hold);
     if(c.fee)setVal('homeFeeInput',c.fee);
@@ -296,6 +310,7 @@ async function loadConfig(){
       document.getElementById('socialInfluenceVal').textContent=Math.round(parseFloat(c.social_influence)*100)+'%';
     }
     renderSummary(c.traders||[]);
+    renderStockSummaryFromConfig();
   }catch(e){}
 }
 function setVal(id,v){document.getElementById(id).value=v;}
@@ -310,7 +325,7 @@ function autoSaveConfig(){
   const existing = loadStoredConfig();
   const c={
     ...existing,
-    steps:getVal('homeStepsInput'),price:getVal('homePriceInput'),
+    steps:getVal('homeStepsInput'),
     cash:getVal('homeCashInput'),hold:getVal('homeHoldInput'),fee:getVal('homeFeeInput'),slip:getVal('homeSlipInput'),
     social_influence:getVal('homeSocialInput'),
   };
@@ -384,6 +399,59 @@ function autoSaveTraders(){
 }
 function saveTraderConfig(){autoSaveTraders();closeConfig();}
 function renderSummary(traders){const configured=(traders||[]).filter(t=>t.api_key).length;document.getElementById('configuredSummary').textContent=`${configured} of ${(traders||[]).length||7} traders configured`;}
+
+/* ---- Stock configuration ---- */
+function stockDefaults(){
+  const c=loadStoredConfig();
+  if(c.stocks&&c.stocks.length)return c.stocks;
+  return [{name:'Stock 1',price:parseFloat(c.price||100)||100,hold:parseInt(c.hold||20,10)||0}];
+}
+function openStockConfig(){
+  renderStockRows(stockDefaults());
+  document.getElementById('stockConfig').classList.add('open');
+}
+function closeStockConfig(){document.getElementById('stockConfig').classList.remove('open');}
+function renderStockRows(stocks){
+  const head=`<div class="trader-row trader-head" style="grid-template-columns:1.5fr 1.2fr 1.2fr auto;"><span>Name</span><span>Price</span><span>Holdings</span><span></span></div>`;
+  const rows=stocks.map((s,i)=>`<div class="trader-row" data-index="${i}" style="grid-template-columns:1.5fr 1.2fr 1.2fr auto;">
+    <input data-field="name" value="${esc(s.name||`Stock ${i+1}`)}" placeholder="Stock ${i+1}" oninput="autoSaveStocks()">
+    <input data-field="price" type="number" value="${esc(s.price||100)}" min="0.01" step="1" oninput="autoSaveStocks()">
+    <input data-field="hold" type="number" value="${esc(s.hold||0)}" min="0" step="1" oninput="autoSaveStocks()">
+    <button class="remove-trader" onclick="removeStock(this)" title="Remove stock">×</button>
+  </div>`).join('');
+  document.getElementById('stockRows').innerHTML=head+rows;
+}
+function addStock(){
+  const c=loadStoredConfig();
+  const stocks=(c.stocks&&c.stocks.length)?c.stocks:stockDefaults();
+  stocks.push({name:`Stock ${stocks.length+1}`,price:100,hold:0});
+  renderStockRows(stocks);
+  autoSaveStocks();
+}
+function removeStock(btn){const row=btn.closest('.trader-row');if(row)row.remove();autoSaveStocks();}
+function stockRowData(row){
+  const d={};
+  row.querySelectorAll('[data-field]').forEach(x=>d[x.dataset.field]=x.value.trim());
+  d.price=parseFloat(d.price)||100;
+  d.hold=parseInt(d.hold,10)||0;
+  return d;
+}
+function autoSaveStocks(){
+  const stocks=[...document.querySelectorAll('#stockRows .trader-row[data-index]')].map(stockRowData);
+  const c=loadStoredConfig();
+  c.stocks=stocks;
+  localStorage.setItem('ats_config',JSON.stringify(c));
+  syncToServer();
+  renderStockSummary(stocks);
+}
+function saveStockConfig(){autoSaveStocks();closeStockConfig();}
+function renderStockSummary(stocks){
+  const list=(stocks||[]).map(s=>s.name).filter(Boolean).join(', ');
+  document.getElementById('stockSummary').textContent=list?`${(stocks||[]).length} stock(s): ${list}`:'No stocks configured';
+}
+function renderStockSummaryFromConfig(){
+  renderStockSummary(stockDefaults());
+}
 function showError(msg){
   const el=document.getElementById('homeError');
   el.textContent=msg;el.style.display='block';

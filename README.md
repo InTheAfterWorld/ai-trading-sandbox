@@ -1,6 +1,8 @@
 <div align="center">
 
-# AI Trading Society
+<img src="logo.png" alt="AI Trading Sandbox Logo" width="160">
+
+# AI Trading Sandbox
 
 A multi-agent stock market sandbox where AI traders with distinct personalities
 buy and sell a single stock while market events fire — and a human player can
@@ -34,7 +36,7 @@ step in and trade alongside them.
 
 ## Introduction
 
-AI Trading Society is a sandbox for studying how different AI decision makers
+AI Trading Sandbox is a sandbox for studying how different AI decision makers
 behave in a market-like environment. Several LLM-backed traders buy and sell one
 stock, personality traits bend their decisions, market events shake sentiment,
 and order matching moves the price with fees and slippage.
@@ -310,7 +312,7 @@ ai_trading_society/
 
 run.py                    # Web dashboard / CLI entry point
 templates/                # Web UI pages
-```
+
 
 ## Contributing
 

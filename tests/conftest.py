@@ -16,12 +16,37 @@ class ScriptedExternalAIAgent(ExternalAIAgent):
         self.sell_prob = sell_prob
 
     def act(self, observation):
-        if self.buy_prob >= self.sell_prob and self.buy_prob > 0:
-            quantity = max(1, int(self.cash * 0.2 / max(observation["price"], 0.01)))
-            return {"action": "buy", "quantity": quantity, "reasoning": "scripted buy"}
-        if self.sell_prob > 0 and self.holdings > 0:
-            return {"action": "sell", "quantity": self.holdings, "reasoning": "scripted sell"}
-        return {"action": "hold", "quantity": 0, "reasoning": "scripted hold"}
+        # Multi-stock: iterate over per-stock data from the observation.
+        stocks = observation.get("stocks", [])
+        if not stocks:
+            # Fallback for legacy observations without the stocks list.
+            price = observation.get("price", 100)
+            stocks = [{"symbol": "ATSX", "price": price, "my_holdings": 0}]
+
+        decisions = []
+        for s in stocks:
+            sym = s["symbol"]
+            price = s.get("price", 100)
+            my_holdings = s.get("my_holdings", 0)
+
+            if self.buy_prob >= self.sell_prob and self.buy_prob > 0:
+                quantity = max(1, int(self.cash * 0.2 / max(price, 0.01)))
+                decisions.append({
+                    "symbol": sym, "action": "buy",
+                    "quantity": quantity, "reasoning": "scripted buy",
+                })
+            elif self.sell_prob > 0 and my_holdings > 0:
+                decisions.append({
+                    "symbol": sym, "action": "sell",
+                    "quantity": int(my_holdings), "reasoning": "scripted sell",
+                })
+            else:
+                decisions.append({
+                    "symbol": sym, "action": "hold",
+                    "quantity": 0, "reasoning": "scripted hold",
+                })
+
+        return {"decisions": decisions}
 
 
 @pytest.fixture
@@ -67,8 +92,19 @@ def standard_observation():
         "step": 5,
         "price": 100.0,
         "price_history": [95, 96, 97, 98, 99, 100],
+        "stocks": [
+            {
+                "symbol": "ATSX",
+                "name": "Stock 1",
+                "price": 100.0,
+                "price_history": [95, 96, 97, 98, 99, 100],
+                "last_volume": 100,
+                "my_holdings": 50,
+            }
+        ],
         "my_cash": 10000.0,
-        "my_holdings": 50,
+        "my_holdings": {"ATSX": 50},
+        "my_total_holdings": 50,
         "my_wealth": 15000.0,
         "last_volume": 100,
         "market_sentiment": 0.0,
