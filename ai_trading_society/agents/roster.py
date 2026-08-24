@@ -163,12 +163,16 @@ def build_agent_roster(
     cash: float = 10000.0,
     holdings: int = 20,
     stocks: Optional[List[StockSpec]] = None,
-) -> Tuple[List[BaseAgent], PlayerAgent]:
+    include_player: bool = True,
+) -> Tuple[List[BaseAgent], Optional[PlayerAgent]]:
     """
     Build and return the list of participating agents for a market simulation run.
 
     Parameters
     ----------
+    include_player : bool, optional
+        When False the human player does NOT join as a trader: no
+        PlayerAgent is created (spectator mode). Default True.
     provider : str
         API provider name (e.g. "openai", "google", "openrouter", etc.).
     model : str
@@ -235,9 +239,11 @@ def build_agent_roster(
         trait_agent = create_personality_agent(base, personality=personality)
         agents.append(trait_agent)
 
-    player_agent = PlayerAgent(
-        agent_id="Player (You)", cash=cash, holdings=holdings_dict
-    )
-    agents.append(player_agent)
+    player_agent: Optional[PlayerAgent] = None
+    if include_player:
+        player_agent = PlayerAgent(
+            agent_id="Player (You)", cash=cash, holdings=holdings_dict
+        )
+        agents.append(player_agent)
 
     return agents, player_agent

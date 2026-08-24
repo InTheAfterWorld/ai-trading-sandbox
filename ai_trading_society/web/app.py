@@ -11,12 +11,13 @@ Then open http://localhost:5000 in your browser.
 """
 
 import os
+import re
 import sys
 import uuid
 from collections import OrderedDict
 
 try:
-    from flask import Flask, jsonify, render_template, request
+    from flask import Flask, jsonify, render_template, request, send_file
     from flask import session as flask_session
 except ImportError:
     print("Flask is not installed. Install it with:")
@@ -27,6 +28,7 @@ from ai_trading_society.agents.external_ai_agent import (
     _DEFAULT_MODELS,
     ExternalAIAgent,
 )
+from ai_trading_society.agents.player_agent import PlayerAgent
 from ai_trading_society.agents.roster import build_agent_roster, resolve_social_map
 from ai_trading_society.config import MarketConfig, StockSpec
 from ai_trading_society.config_store import load_config, save_config
@@ -37,12 +39,19 @@ from ai_trading_society.console_utils import (
 )
 from ai_trading_society.market_env import MarketEnv
 from ai_trading_society.market_events import EVENT_TEMPLATES
+from ai_trading_society.report_export import generate_report_html, save_report
 from ai_trading_society.simulator import Simulator
 
 app = Flask(__name__, template_folder="../../templates", static_folder="../../static")
 # Never fall back to a hard-coded secret: it would let an attacker on the
 # local network forge session cookies. Generate a fresh random key per boot.
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.urandom(24)
+
+# Exported HTML reports live here and are served as read-only snapshots.
+# Anchored to the project root so saving (CWD-relative open) and serving
+# (Flask resolves relative paths against app.root_path) always agree.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REPORTS_DIR = os.path.join(_PROJECT_ROOT, "runs", "reports")
 
 # ---------------------------------------------------------------------------
 # Session state is server-side; the browser cookie stores only its identifier.
@@ -101,6 +110,71 @@ def _parse_float(value, field: str, *, minimum: float = 0.0, maximum=None):
     if maximum is not None and parsed > maximum:
         return None, jsonify({"error": f"{field} must be at most {maximum}."}), 400
     return parsed, None, None
+
+
+def _aggregate_actions(stock_acts, first_symbol: str = "ATSX"):
+    """
+    Collapse one agent's nested per-stock actions into a compact summary.
+
+    agent_actions is nested: {sym: {action, requested_qty, filled_qty,
+    reasoning, error}}. Returns (action, requested, filled, reasoning,
+    error, per_stock_list).
+    """
+    if isinstance(stock_acts, dict) and stock_acts:
+        per_stock = []
+        dominant_action = "hold"
+        max_filled = 0
+        total_req = 0
+        total_filled = 0
+        any_error = False
+        reasoning_parts = []
+        for sym, sa in stock_acts.items():
+            if not isinstance(sa, dict):
+                continue
+            act = sa.get("action", "hold")
+            req = sa.get("requested_qty", 0)
+            filled = sa.get("filled_qty", 0)
+            total_req += req
+            total_filled += filled
+            if filled > max_filled:
+                max_filled = filled
+                dominant_action = act
+            if sa.get("error"):
+                any_error = True
+            if sa.get("reasoning"):
+                reasoning_parts.append(f"{sym}: {sa['reasoning']}")
+            per_stock.append({
+                "symbol": sym,
+                "action": act,
+                "quantity": filled,
+                "requested": req,
+                "filled": filled,
+                "reasoning": sa.get("reasoning", ""),
+            })
+        return (
+            dominant_action,
+            total_req,
+            total_filled,
+            " | ".join(reasoning_parts),
+            any_error,
+            per_stock,
+        )
+    # Legacy flat structure fallback.
+    return (
+        stock_acts.get("action", "hold"),
+        stock_acts.get("requested_qty", 0),
+        stock_acts.get("filled_qty", 0),
+        stock_acts.get("reasoning", ""),
+        bool(stock_acts.get("error", False)),
+        [{
+            "symbol": first_symbol,
+            "action": stock_acts.get("action", "hold"),
+            "quantity": stock_acts.get("filled_qty", 0),
+            "requested": stock_acts.get("requested_qty", 0),
+            "filled": stock_acts.get("filled_qty", 0),
+            "reasoning": stock_acts.get("reasoning", ""),
+        }],
+    )
 
 
 @app.before_request
@@ -201,6 +275,10 @@ def api_start():
     )
     if error:
         return error, status
+    # Whether the human player joins the market as a trader (default: yes).
+    player_participates = data.get("player_participates", True)
+    if not isinstance(player_participates, bool):
+        player_participates = True
     provider = data.get("provider") or "openai"
     model = data.get("model") or _DEFAULT_MODELS.get(provider) or "gpt-4o"
     api_key = data.get("api_key", "")
@@ -213,8 +291,13 @@ def api_start():
             seed = None
 
     # Parse multi-stock configuration. Each entry: {name, price, hold}.
-    # Falls back to a single default stock when no stocks are provided.
+    # Falls back to the server-saved config's stocks, then to a single
+    # default stock, so a request without "stocks" keeps multi-stock runs.
     raw_stocks = data.get("stocks")
+    if not (isinstance(raw_stocks, list) and raw_stocks):
+        saved_stocks = load_config().get("stocks")
+        if isinstance(saved_stocks, list) and saved_stocks:
+            raw_stocks = saved_stocks
     stock_specs: list = []
     if isinstance(raw_stocks, list) and raw_stocks:
         seen = set()
@@ -265,10 +348,22 @@ def api_start():
             cash=cash,
             holdings=hold,
             stocks=stock_specs,
+            include_player=player_participates,
         )
     except RuntimeError as exc:
         print(f"[api/start] build_agent_roster failed: {exc}")
         return jsonify({"error": str(exc)}), 400
+
+    # A market with neither AI traders nor the human player cannot run.
+    ai_count = sum(
+        1 for a in agents
+        if not bool(getattr(a, "is_player", False))
+    )
+    if ai_count == 0 and player_agent is None:
+        return jsonify({
+            "error": "No participants: enable at least one AI trader "
+                     "or rejoin as a trader yourself.",
+        }), 400
 
     try:
         env = MarketEnv(config, agents)
@@ -276,8 +371,9 @@ def api_start():
         return jsonify({"error": str(exc)}), 400
     sim = Simulator(env)
 
-    # Wire up the always-present player agent so it can read buffered actions.
-    player_agent._env = env
+    # Wire up the player agent so it can read buffered actions.
+    if player_agent is not None:
+        player_agent._env = env
 
     # Resolve social relationships (idol/friends/enemies) so peers' recent
     # trades flow into each agent's observation for herding behavior.
@@ -309,6 +405,10 @@ def api_start():
     state["initial_wealths"] = initial_wealths
     state["prev_wealths"] = dict(initial_wealths)
     state["is_player_mode"] = True
+    state["run_id"] = metadata.run_id
+    state["seed"] = metadata.seed
+    # Per-round snapshots for history replay, agent timelines, and reports.
+    state["history"] = []
 
     # Build agent roster for the frontend.
     roster = []
@@ -323,6 +423,7 @@ def api_start():
             "type": agent_type_label(agent),
             "personality": agent_personality(agent),
             "personality_desc": agent_personality_desc(agent),
+            "is_player": isinstance(agent, PlayerAgent),
             "cash": round(agent.cash, 2),
             "holdings": h,
             "wealth": round(wealth, 2),
@@ -417,57 +518,9 @@ def api_step():
     agents_data = []
     for aid, agent in env.agents.items():
         stock_acts = actions.get(aid, {})
-        if isinstance(stock_acts, dict) and stock_acts:
-            per_stock = []
-            dominant_action = "hold"
-            max_filled = 0
-            total_req = 0
-            total_filled = 0
-            any_error = False
-            reasoning_parts = []
-            for sym, sa in stock_acts.items():
-                if not isinstance(sa, dict):
-                    continue
-                act = sa.get("action", "hold")
-                req = sa.get("requested_qty", 0)
-                filled = sa.get("filled_qty", 0)
-                total_req += req
-                total_filled += filled
-                if filled > max_filled:
-                    max_filled = filled
-                    dominant_action = act
-                if sa.get("error"):
-                    any_error = True
-                if sa.get("reasoning"):
-                    reasoning_parts.append(f"{sym}: {sa['reasoning']}")
-                per_stock.append({
-                    "symbol": sym,
-                    "action": act,
-                    "quantity": filled,
-                    "requested": req,
-                    "filled": filled,
-                    "reasoning": sa.get("reasoning", ""),
-                })
-            action = dominant_action
-            req = total_req
-            filled = total_filled
-            reasoning = " | ".join(reasoning_parts)
-            error = any_error
-        else:
-            # Legacy flat structure fallback.
-            action = stock_acts.get("action", "hold")
-            req = stock_acts.get("requested_qty", 0)
-            filled = stock_acts.get("filled_qty", 0)
-            reasoning = stock_acts.get("reasoning", "")
-            error = bool(stock_acts.get("error", False))
-            per_stock = [{
-                "symbol": next(iter(env.stocks.keys()), "ATSX"),
-                "action": action,
-                "quantity": filled,
-                "requested": req,
-                "filled": filled,
-                "reasoning": reasoning,
-            }]
+        action, req, filled, reasoning, error, per_stock = _aggregate_actions(
+            stock_acts, first_symbol=next(iter(env.stocks.keys()), "ATSX")
+        )
 
         wealth = _agent_wealth(agent)
         init_w = state["initial_wealths"].get(aid, wealth)
@@ -485,6 +538,7 @@ def api_step():
             "reasoning": reasoning,
             "error": bool(error),
             "actions": per_stock,
+            "is_player": isinstance(agent, PlayerAgent),
             "cash": round(agent.cash, 2),
             "holdings": agent.holdings if isinstance(agent.holdings, dict) else {},
             "wealth": round(wealth, 2),
@@ -509,6 +563,33 @@ def api_step():
         for sm in env.stocks.values()
     ]
 
+    events_payload = [
+        {
+            "name": e.get("name", ""),
+            "description": e.get("description", ""),
+            "type": e.get("type", ""),
+            "price_impact": e.get("price_impact", 0.0),
+            "scope": e.get("scope", "global"),
+            "stock": e.get("stock"),
+        }
+        for e in triggered_events
+    ]
+
+    # Persist a round snapshot so the frontend can replay any past round
+    # and so report export can include full decision logs.
+    state.setdefault("history", []).append({
+        "step": current_step,
+        "stocks": stocks_payload,
+        "agents": agents_data,
+        "events": events_payload,
+        "price": round(price, 2),
+        "prev_price": round(prev_price, 2),
+        "change_pct": round(change_pct, 2),
+        "volume": step_data.get("matched_volume", 0),
+        "total_buy": total_buy,
+        "total_sell": total_sell,
+    })
+
     return jsonify({
         "step": current_step,
         "total_steps": total_steps,
@@ -521,14 +602,7 @@ def api_step():
         "total_sell": total_sell,
         "agents": agents_data,
         "stocks": stocks_payload,
-        "events": [
-            {
-                "name": e.get("name", ""),
-                "description": e.get("description", ""),
-                "price_impact": e.get("price_impact", 0.0),
-            }
-            for e in triggered_events
-        ],
+        "events": events_payload,
         "active_events": [
             {
                 "name": e.get("name", ""),
@@ -547,6 +621,9 @@ def api_player_action():
     state = _get_session()
     if "sim" not in state:
         return jsonify({"error": "No active simulation"}), 400
+    env = state["env"]
+    if not any(getattr(a, "is_player", False) for a in env.agents.values()):
+        return jsonify({"error": "You are spectating — rejoin as a trader to place orders."}), 400
     data = request.get_json(silent=True) or {}
     action = data.get("action", "hold")
     quantity, error, status = _parse_int(data.get("quantity", 0), "quantity")
@@ -556,7 +633,6 @@ def api_player_action():
     if action not in ("buy", "sell", "hold"):
         return jsonify({"error": "Invalid action"}), 400
 
-    env = state["env"]
     symbol = data.get("name") or data.get("symbol")
     env.set_player_action(action, quantity, symbol=symbol)
     return jsonify({"ok": True})
@@ -596,6 +672,7 @@ def api_results():
             "id": agent.agent_id,
             "type": agent_type_label(agent),
             "personality": agent_personality(agent),
+            "is_player": isinstance(agent, PlayerAgent),
             "cash": round(agent.cash, 2),
             "holdings": agent.holdings if isinstance(agent.holdings, dict) else {},
             "wealth": round(wealth, 2),
@@ -642,6 +719,136 @@ def api_results():
     })
 
 
+@app.route("/api/history", methods=["GET"])
+def api_history():
+    """Return per-round snapshots for timeline replay and agent timelines."""
+    state = _get_session()
+    if "env" not in state:
+        return jsonify({"error": "No active simulation"}), 400
+    return jsonify({
+        "history": state.get("history", []),
+        "current_step": state.get("current_step", 0),
+        "total_steps": state.get("steps", 0),
+    })
+
+
+@app.route("/api/report/export", methods=["POST"])
+def api_report_export():
+    """Generate a self-contained HTML report and return its share link."""
+    state = _get_session()
+    if "env" not in state:
+        return jsonify({"error": "No active simulation"}), 400
+
+    env = state["env"]
+    sim = state["sim"]
+    metadata = getattr(sim, "metadata", None)
+    run_id = state.get("run_id") or (metadata.run_id if metadata else uuid.uuid4().hex[:12])
+    seed = state.get("seed")
+
+    def _agent_wealth(agent) -> float:
+        h = agent.holdings if isinstance(agent.holdings, dict) else {}
+        return agent.cash + sum(
+            h.get(sym, 0) * sm.price for sym, sm in env.stocks.items()
+        )
+
+    ranked = sorted(env.agents.values(), key=_agent_wealth, reverse=True)
+    rankings = []
+    for rank, agent in enumerate(ranked, 1):
+        wealth = _agent_wealth(agent)
+        init_w = state["initial_wealths"].get(agent.agent_id, wealth)
+        metrics = sim._compute_agent_metrics(agent.agent_id)
+        rankings.append({
+            "rank": rank,
+            "id": agent.agent_id,
+            "type": agent_type_label(agent),
+            "is_player": isinstance(agent, PlayerAgent),
+            "cash": round(agent.cash, 2),
+            "wealth": round(wealth, 2),
+            "return_pct": round((wealth / init_w - 1) * 100, 2) if init_w > 0 else 0.0,
+            "sharpe": round(metrics["sharpe"], 2),
+            "max_drawdown": round(metrics["max_drawdown"] * 100, 2),
+            "volatility": round(metrics["volatility"] * 100, 2),
+            "win_rate": round(metrics["win_rate"] * 100, 1),
+        })
+
+    stocks = [
+        {
+            "symbol": sm.symbol,
+            "name": sm.name,
+            "price_history": [round(p, 2) for p in sm.price_history],
+        }
+        for sm in env.stocks.values()
+    ]
+
+    # Wealth curves: round 0 is the initial wealth, then one point per step.
+    wealth_history = {}
+    for aid in env.agents:
+        pts = [round(state["initial_wealths"].get(aid, 0.0), 2)]
+        for snap in state.get("history", []):
+            for a in snap.get("agents", []):
+                if a.get("id") == aid:
+                    pts.append(a.get("wealth", pts[-1]))
+        wealth_history[aid] = pts
+
+    # Decision log per agent: one row per round.
+    agent_logs = {}
+    for snap in state.get("history", []):
+        for a in snap.get("agents", []):
+            agent_logs.setdefault(a.get("id", "?"), []).append({
+                "round": snap.get("step", 0),
+                "action": a.get("action", "hold"),
+                "requested": a.get("requested", 0),
+                "filled": a.get("filled", 0),
+                "reasoning": a.get("reasoning", ""),
+                "wealth": a.get("wealth", 0),
+                "delta": a.get("delta"),
+            })
+
+    buy_trades = [t for t in env.trade_history if t.action == "buy"]
+    sell_trades = [t for t in env.trade_history if t.action == "sell"]
+    trade_summary = {
+        "total": len(env.trade_history),
+        "buys": len(buy_trades),
+        "sells": len(sell_trades),
+    }
+
+    event_history = (
+        list(env.event_manager.event_history) if env.event_manager else []
+    )
+
+    html_text = generate_report_html(
+        run_id=run_id,
+        seed=seed,
+        total_steps=state.get("steps", 0),
+        steps_completed=state.get("current_step", 0),
+        stocks=stocks,
+        rankings=rankings,
+        wealth_history=wealth_history,
+        event_history=event_history,
+        agent_logs=agent_logs,
+        trade_summary=trade_summary,
+    )
+    save_report(html_text, run_id, reports_dir=REPORTS_DIR)
+    return jsonify({
+        "ok": True,
+        "run_id": run_id,
+        "url": f"/report/{run_id}",
+        "download_url": f"/report/{run_id}?download=1",
+    })
+
+
+@app.route("/report/<run_id>")
+def serve_report(run_id: str):
+    """Serve an exported read-only report snapshot."""
+    if not re.fullmatch(r"[A-Za-z0-9_\-]+", run_id):
+        return jsonify({"error": "Invalid report id"}), 400
+    path = os.path.join(REPORTS_DIR, f"{run_id}.html")
+    if not os.path.isfile(path):
+        return jsonify({"error": "Report not found"}), 404
+    as_attachment = request.args.get("download") == "1"
+    return send_file(path, mimetype="text/html", as_attachment=as_attachment)
+
+
 @app.route("/api/god/event", methods=["POST"])
 def api_god_event():
     """Inject a forced market event or custom news (God Mode)."""
@@ -674,6 +881,8 @@ def api_god_event():
                 "description": event.description,
                 "type": event.event_type.value,
                 "price_impact": event.price_impact,
+                "scope": event.scope,
+                "stock": event.target_stock,
             },
         })
     return jsonify({"error": "Event manager not initialized"}), 400

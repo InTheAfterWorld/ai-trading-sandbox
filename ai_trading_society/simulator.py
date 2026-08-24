@@ -359,9 +359,11 @@ class Simulator:
         event = self.env.event_manager.force_trigger_event(
             name=name,
             step=self.env.step_count,
+            stock_names=list(self.env.stocks.keys()),
         )
+        stock_tag = f" on '{event.target_stock}'" if event.target_stock else " (global)"
         print(colorize(
-            f"  Injected event '{event.name}': {event.description} "
+            f"  Injected event '{event.name}'{stock_tag}: {event.description} "
             f"(impact {event.price_impact * 100:+.0f}%)",
             Colors.YELLOW,
         ))
@@ -551,8 +553,11 @@ class Simulator:
         for evt in triggered_events:
             event_name = evt.get("name", "Unknown Event")
             event_desc = evt.get("description", "")
+            stock_tag = (
+                f" [{evt.get('stock')}]" if evt.get("stock") else " [market-wide]"
+            )
             print(colorize(
-                f'  *** EVENT: {event_name} — "{event_desc}" ***',
+                f'  *** EVENT: {event_name}{stock_tag} — "{event_desc}" ***',
                 Colors.YELLOW,
             ))
         if triggered_events:
@@ -569,8 +574,9 @@ class Simulator:
                 total = e.get("total_steps", 1)
                 bar_filled = "#" * remaining
                 bar_empty = "-" * max(0, total - remaining)
+                stock_tag = f" [{e.get('stock')}]" if e.get("stock") else ""
                 print(colorize(
-                    f"    {e['name']} [{bar_filled}{bar_empty}] "
+                    f"    {e['name']}{stock_tag} [{bar_filled}{bar_empty}] "
                     f"{remaining}/{total} steps left",
                     Colors.YELLOW,
                 ))
@@ -578,11 +584,36 @@ class Simulator:
 
         # --- Agent actions with type labels, colors, return %, and wealth delta ---
         for agent_id, agent in self.env.agents.items():
-            act_info = actions.get(agent_id, {})
-            action = act_info.get("action", "hold")
-            req = act_info.get("requested_qty", 0)
-            filled = act_info.get("filled_qty", 0)
-            reasoning = act_info.get("reasoning", "")
+            stock_acts = actions.get(agent_id, {})
+            # agent_actions is nested {sym: {action, ...}}; aggregate into a
+            # dominant action + totals (same logic as the web UI).
+            if isinstance(stock_acts, dict) and stock_acts:
+                dominant_action, max_filled = "hold", 0
+                total_req = total_filled = 0
+                reasoning_parts = []
+                for sa in stock_acts.values():
+                    if not isinstance(sa, dict):
+                        continue
+                    f = sa.get("filled_qty", 0)
+                    total_req += sa.get("requested_qty", 0)
+                    total_filled += f
+                    if f > max_filled:
+                        max_filled = f
+                        dominant_action = sa.get("action", "hold")
+                    if sa.get("reasoning"):
+                        reasoning_parts.append(
+                            f"{sa.get('symbol', '')}: {sa['reasoning']}"
+                        )
+                action = dominant_action
+                req = total_req
+                filled = total_filled
+                reasoning = " | ".join(reasoning_parts)
+            else:
+                # Legacy flat structure fallback.
+                action = stock_acts.get("action", "hold")
+                req = stock_acts.get("requested_qty", 0)
+                filled = stock_acts.get("filled_qty", 0)
+                reasoning = stock_acts.get("reasoning", "")
 
             h = agent.holdings if isinstance(agent.holdings, dict) else {}
             wealth = agent.cash + sum(

@@ -106,14 +106,18 @@ class TraitAgent(BaseAgent):
             object.__setattr__(self, "_cash_tmp", value)
 
     @property
-    def holdings(self) -> int:
-        """Delegate to base_agent so state stays in sync."""
+    def holdings(self) -> Any:
+        """Delegate to base_agent so state stays in sync.
+
+        Multi-stock mode stores holdings as a ``{name: qty}`` dict; the
+        loose annotation keeps legacy int holdings working too.
+        """
         if hasattr(self, "base_agent"):
             return self.base_agent.holdings
         return self._holdings_tmp
 
     @holdings.setter
-    def holdings(self, value: int) -> None:
+    def holdings(self, value: Any) -> None:
         if hasattr(self, "base_agent"):
             self.base_agent.holdings = value
         else:
@@ -138,6 +142,13 @@ class TraitAgent(BaseAgent):
 
         # Get base agent's decision
         base_action = self.base_agent.act(observation)
+
+        # Multi-stock format: {"decisions": [{name, action, quantity, ...}]}
+        # Traits are applied to each stock's decision independently.
+        if isinstance(base_action.get("decisions"), list):
+            return self._apply_traits_to_decisions(observation, base_action)
+
+        # Legacy flat format: {"action", "quantity", "reasoning"}
         action_type = base_action.get("action", "hold")
         quantity = max(0, int(base_action.get("quantity", 0)))
         base_reasoning = base_action.get("reasoning", "")
@@ -169,6 +180,111 @@ class TraitAgent(BaseAgent):
                 result["reasoning"] = base_reasoning
         return result
 
+    # ------------------------------------------------------------------
+    # Multi-stock trait application
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _holdings_qty(value: Any) -> int:
+        """Coerce a holdings value (int or {symbol: qty} dict) into an int."""
+        if isinstance(value, dict):
+            return int(sum(v for v in value.values()
+                           if isinstance(v, (int, float))))
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    def _stock_obs(self, obs: Dict[str, Any], symbol: str) -> Dict[str, Any]:
+        """Build a legacy-style flat observation scoped to one stock."""
+        stocks = obs.get("stocks") or []
+        stock = None
+        for s in stocks:
+            if not isinstance(s, dict):
+                continue
+            if str(s.get("symbol") or s.get("name") or "") == symbol:
+                stock = s
+                break
+        if stock is None and stocks and isinstance(stocks[0], dict):
+            stock = stocks[0]  # single-stock fallback
+        if stock is None:
+            stock = {
+                "price": obs.get("price", 100),
+                "price_history": obs.get("price_history", []),
+            }
+        scoped = dict(stock)
+        scoped.setdefault("price", obs.get("price", 100))
+        scoped.setdefault("price_history", obs.get("price_history", []))
+        # Portfolio-level context shared across stocks.
+        scoped["my_cash"] = obs.get("my_cash", 0)
+        qty = self._holdings_qty(stock.get("my_holdings", 0))
+        scoped["my_holdings"] = qty
+        scoped["my_wealth"] = obs.get(
+            "my_wealth",
+            obs.get("my_cash", 0) + qty * float(scoped.get("price", 100) or 0),
+        )
+        scoped["market_sentiment"] = obs.get("market_sentiment", 0.0)
+        scoped["social_peers"] = obs.get("social_peers")
+        scoped["social_influence"] = obs.get("social_influence", 0.0)
+        return scoped
+
+    def _apply_traits_to_decisions(
+        self, observation: Dict[str, Any], base_action: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Apply the trait pipeline to every decision in a multi-stock result."""
+        decisions_out = []
+        dominant_action = "hold"
+        dominant_qty = 0
+        for d in base_action["decisions"]:
+            if not isinstance(d, dict):
+                continue
+            symbol = str(d.get("name") or d.get("symbol") or "")
+            action_type = str(d.get("action", "hold")).lower()
+            if action_type not in ("buy", "sell", "hold"):
+                action_type = "hold"
+            quantity = max(0, int(d.get("quantity", 0) or 0))
+            reasoning = str(d.get("reasoning", ""))
+            original = action_type
+            error = bool(d.get("error", False))
+
+            stock_obs = self._stock_obs(observation, symbol)
+            action_type, quantity = self._apply_panic(stock_obs, action_type, quantity)
+            action_type, quantity = self._apply_fomo(stock_obs, action_type, quantity)
+            action_type, quantity = self._apply_loss_aversion(stock_obs, action_type, quantity)
+            action_type, quantity = self._apply_greed(stock_obs, action_type, quantity)
+            action_type, quantity = self._apply_regret_avoidance(
+                stock_obs, action_type, quantity
+            )
+            action_type, quantity = self._apply_stubbornness(action_type, quantity)
+            action_type, quantity = self._apply_overconfidence(action_type, quantity)
+            action_type, quantity, social_triggered = self._apply_social(
+                stock_obs, action_type, quantity
+            )
+
+            if quantity > dominant_qty:
+                dominant_qty = quantity
+                dominant_action = action_type
+
+            if reasoning:
+                if social_triggered:
+                    reasoning = f"[social] {reasoning}"
+                elif action_type != original:
+                    reasoning = f"[trait override] {reasoning}"
+
+            decisions_out.append({
+                "name": d.get("name", symbol),
+                "symbol": d.get("symbol", symbol),
+                "action": action_type,
+                "quantity": quantity,
+                "reasoning": reasoning,
+                **({"error": True} if error else {}),
+            })
+
+        # Remember the dominant decision for stubbornness next round.
+        self._last_action = dominant_action
+        self._last_quantity = dominant_qty
+        return {"decisions": decisions_out}
+
     def _apply_panic(
         self, obs: Dict[str, Any], action: str, quantity: int
     ) -> tuple[str, int]:
@@ -187,7 +303,7 @@ class TraitAgent(BaseAgent):
         if drawdown > 0.10:
             if self.rng.random() < self.panic:
                 # Panic sell everything
-                holdings = obs.get("my_holdings", 0)
+                holdings = self._holdings_qty(obs.get("my_holdings", 0))
                 if holdings > 0:
                     return "sell", holdings
 
@@ -232,7 +348,7 @@ class TraitAgent(BaseAgent):
         # Check for recent drop
         if prices[-1] < prices[-2] * 0.97:  # 3%+ drop
             if self.rng.random() < self.loss_aversion:
-                holdings = obs.get("my_holdings", 0)
+                holdings = self._holdings_qty(obs.get("my_holdings", 0))
                 if holdings > 0:
                     # Sell half of holdings
                     return "sell", max(1, holdings // 2)
@@ -276,12 +392,17 @@ class TraitAgent(BaseAgent):
         if action != "sell":
             return action, quantity
 
-        # Check if we're losing money relative to actual initial wealth
-        current_cash = obs.get("my_cash", 0)
-        holdings = obs.get("my_holdings", 0)
-        price = obs.get("price", 100)
-
-        current_wealth = current_cash + holdings * price
+        # Check if we're losing money relative to actual initial wealth.
+        # Prefer the portfolio-level wealth from the observation (correct in
+        # multi-stock mode); fall back to cash + this stock's value.
+        portfolio_wealth = obs.get("my_wealth")
+        if portfolio_wealth is None:
+            current_cash = obs.get("my_cash", 0)
+            holdings_w = self._holdings_qty(obs.get("my_holdings", 0))
+            price = obs.get("price", 100)
+            portfolio_wealth = current_cash + holdings_w * price
+        current_wealth = portfolio_wealth
+        holdings = self._holdings_qty(obs.get("my_holdings", 0))
 
         # If we're down and trying to sell holdings
         if holdings > 0 and current_wealth < self._initial_wealth * 0.95:
@@ -377,7 +498,7 @@ class TraitAgent(BaseAgent):
 
         price = obs.get("price", 100.0)
         cash = obs.get("my_cash", 0.0)
-        holdings = obs.get("my_holdings", 0)
+        holdings = self._holdings_qty(obs.get("my_holdings", 0))
 
         if net > 0 and action != "buy":
             # Herd into a buy (friends/idol are accumulating).

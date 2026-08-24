@@ -10,8 +10,8 @@ identically from the terminal. Optional flags override individual fields.
 
 from typing import Optional
 
-from .agents.roster import DEFAULT_AI_MODELS, build_agent_roster
-from .config import MarketConfig000, StockSpec
+from .agents.roster import DEFAULT_AI_MODELS, build_agent_roster, resolve_social_map
+from .config import MarketConfig, StockSpec
 from .config_store import load_config
 from .market_env import MarketEnv
 from .simulator import Simulator
@@ -41,25 +41,25 @@ def run_society_mode(
     steps = steps or cfg.get("steps") or 5
 
     # Parse multi-stock configuration (falls back to a single default stock).
+    # Config entries use {"name", "price", "hold"} (see config_store); accept
+    # "symbol" as an alias like the web UI does.
     raw_stocks = cfg.get("stocks") or []
     stock_specs: list = []
     if raw_stocks:
         for s in raw_stocks:
             if not isinstance(s, dict):
                 continue
-            symbol = str(s.get("symbol") or "").strip().upper()
-            if not symbol:
+            name = str(s.get("name") or s.get("symbol") or "").strip()
+            if not name:
                 continue
             stock_specs.append(StockSpec(
-                name=str(s.get("name") or symbol),
-                symbol=symbol,
+                name=name,
                 initial_price=float(s.get("price", s.get("initial_price", cfg.get("price", 100.0)))),
                 initial_holdings=int(s.get("hold", s.get("initial_holdings", cfg.get("hold", 0)))),
             ))
     if not stock_specs:
         stock_specs = [StockSpec(
             name="Stock 1",
-            symbol="ATSX",
             initial_price=float(cfg.get("price", 100.0)),
             initial_holdings=int(cfg.get("hold", 0)),
         )]
@@ -73,6 +73,7 @@ def run_society_mode(
         seed=seed,
         fee_rate=float(cfg.get("fee", 0.001)),
         slippage_rate=float(cfg.get("slip", 0.001)),
+        social_influence=float(cfg.get("social_influence", 0.0) or 0.0),
         stocks=stock_specs,
     )
 
@@ -84,11 +85,17 @@ def run_society_mode(
         cash=float(cfg.get("cash", 10000.0)),
         holdings=int(cfg.get("hold", 20)),
         stocks=stock_specs,
+        include_player=cfg.get("player_participates", True) is not False,
     )
     env = MarketEnv(config, agents, seed=seed)
+    # Resolve social relationships (idol/friends/enemies) so herding works in
+    # CLI mode too — same setup as the web dashboard.
+    env.social_map = resolve_social_map(list(env.agents.values()))
+    env._social_influence = config.social_influence
     # Wire the player agent to the environment so its buffered orders are
     # read during order collection (same mechanism as the web dashboard).
-    player_agent._env = env
+    if player_agent is not None:
+        player_agent._env = env
     sim = Simulator(env)
 
     sim.run(

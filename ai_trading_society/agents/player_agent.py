@@ -15,6 +15,8 @@ class PlayerAgent(BaseAgent):
     def __init__(self, agent_id: str = "Player (You)", cash: float = 10000.0, holdings: int = 20):
         super().__init__(agent_id=agent_id, cash=cash, holdings=holdings)
         self._env = None  # Set by MarketEnv or web_app after construction
+        # MarketEnv routes player orders through an implicit market maker.
+        self.is_player = True
 
     def act(self, observation: Dict[str, Any]) -> Dict[str, Any]:
         """Return decisions for all stocks, reading buffered player actions."""

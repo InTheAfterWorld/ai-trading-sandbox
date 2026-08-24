@@ -13,7 +13,7 @@
   --green:#22c55e;--red:#ef4444;--yellow:#eab308;--orange:#f97316;--cyan:#06b6d4;
   --shadow-lg:0 20px 60px rgba(0,0,0,.35);--shadow-sm:0 4px 20px rgba(0,0,0,.25);
   --radius:14px;--radius-lg:18px;--radius-sm:10px;
-}  
+} 
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;min-height:100vh;padding-bottom:70px;overflow-x:hidden;}
 /* Animated glow background */
@@ -22,6 +22,17 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-ap
 .orb-1{width:500px;height:500px;background:var(--purple);top:-200px;left:-100px;animation:drift 16s ease-in-out infinite;}
 .orb-2{width:420px;height:420px;background:var(--blue);bottom:-150px;right:-80px;animation:drift 20s ease-in-out infinite reverse;}
 @keyframes drift{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(40px,-30px) scale(1.08)}66%{transform:translate(-25px,25px) scale(.95)}}
+
+/* ---------- Light theme ---------- */
+body.light{
+  --bg:#f3f5fa;--bg-secondary:#ffffff;--card:#ffffff;--card-hover:#eef2f8;
+  --border:#d9e0ec;--border-hover:#b7c3da;--text:#18213a;--text-dim:#5c6c8c;
+}
+body.light .glow-orb{opacity:.10;}
+body.light .bg-glow{filter:saturate(.8);}
+body.light .topbar{background:rgba(255,255,255,.85);}
+body.light ::-webkit-scrollbar-thumb{background:#c3cede;}
+body.light ::-webkit-scrollbar-thumb:hover{background:#a9b8cf;}
 
 /* Scrollbar */
 ::-webkit-scrollbar{width:8px;height:8px;}
@@ -531,17 +542,141 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
   color:var(--text);font-weight:600;background:var(--bg-secondary);
   border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-size:9.5px;
 }
+
+/* ---------- Round progress bar (top bar) ---------- */
+.round-progress{display:flex;align-items:center;gap:9px;min-width:210px;flex:1;max-width:340px;}
+.rp-bar{flex:1;height:6px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:4px;overflow:hidden;min-width:80px;}
+.rp-fill{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--purple),var(--blue));border-radius:4px;transition:width .45s ease;}
+.rp-label{font-size:11.5px;font-weight:700;color:var(--text);white-space:nowrap;}
+
+/* ---------- Price flash animation ---------- */
+.sp-price.flash-up{animation:flashUp .8s ease;}
+.sp-price.flash-down{animation:flashDown .8s ease;}
+@keyframes flashUp{0%{color:var(--green);text-shadow:0 0 16px rgba(34,197,94,.9);transform:scale(1.05)}100%{}}
+@keyframes flashDown{0%{color:var(--red);text-shadow:0 0 16px rgba(239,68,68,.9);transform:scale(1.05)}100%{}}
+
+/* ---------- Your Portfolio (player trading panel) ---------- */
+.pf-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;}
+@media(max-width:640px){.pf-grid{grid-template-columns:repeat(2,1fr);}}
+.pf-cell{background:var(--bg-secondary);border:1px solid var(--border);border-radius:10px;padding:8px 10px;}
+.pf-label{display:block;font-size:9.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-dim);margin-bottom:3px;font-weight:600;}
+.pf-val{font-size:14px;font-weight:700;}
+.pf-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.pf-qty{
+  width:86px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;
+  padding:7px 10px;color:var(--text);font-size:13px;font-weight:700;outline:none;font-family:inherit;
+}
+.pf-qty:focus{border-color:var(--purple);}
+.pf-chip{
+  font-size:10.5px;font-weight:700;padding:6px 10px;border-radius:7px;cursor:pointer;
+  background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-dim);
+  transition:all .15s;font-family:inherit;
+}
+.pf-chip:hover{border-color:var(--purple);color:var(--purple);}
+.pf-chip.active{border-color:var(--purple);color:var(--purple);background:rgba(167,139,250,.1);}
+.pf-side{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+.pf-side button{
+  padding:7px 13px;border:none;cursor:pointer;font:700 11.5px inherit;background:var(--bg-secondary);
+  color:var(--text-dim);transition:all .15s;
+}
+.pf-side button.active{background:rgba(167,139,250,.15);color:var(--purple);}
+.btn-buy{border:1px solid rgba(34,197,94,.45);color:var(--green);background:rgba(34,197,94,.08);}
+.btn-buy:hover{background:rgba(34,197,94,.18);border-color:var(--green);}
+.btn-sell{border:1px solid rgba(239,68,68,.45);color:var(--red);background:rgba(239,68,68,.08);}
+.btn-sell:hover{background:rgba(239,68,68,.18);border-color:var(--red);}
+.pf-queued{
+  display:none;align-items:center;gap:7px;margin-top:10px;padding:7px 11px;border-radius:8px;
+  background:rgba(234,179,8,.08);border:1px solid rgba(234,179,8,.35);color:var(--yellow);
+  font-size:11.5px;font-weight:600;
+}
+.pf-queued.show{display:flex;}
+.pf-note{font-size:10.5px;color:var(--text-dim);margin-top:9px;font-style:italic;}
+
+/* ---------- Event tab strip + full timeline ---------- */
+.tab-row{display:flex;gap:6px;margin-bottom:10px;}
+.tab-btn{
+  padding:4px 12px;font-size:10.5px;font-weight:700;border:1px solid var(--border);border-radius:7px;
+  background:var(--bg-secondary);color:var(--text-dim);cursor:pointer;font-family:inherit;transition:all .15s;
+}
+.tab-btn.active{border-color:var(--purple);color:var(--purple);background:rgba(167,139,250,.1);}
+.etl-item{
+  background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);
+  padding:9px 11px;margin-bottom:8px;cursor:pointer;transition:all .15s;
+}
+.etl-item:hover{border-color:rgba(234,179,8,.5);transform:translateX(2px);}
+.etl-round{
+  font-size:9.5px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;
+  margin-bottom:4px;display:flex;align-items:center;gap:6px;
+}
+.scope-badge{font-size:8.5px;font-weight:700;padding:1px 6px;border-radius:4px;letter-spacing:.4px;}
+.scope-badge.global{background:rgba(96,165,250,.14);color:var(--blue);}
+.scope-badge.stock{background:rgba(234,179,8,.14);color:var(--yellow);}
+.etl-name{font-size:12px;font-weight:700;}
+.etl-desc{font-size:10.5px;color:var(--text-dim);line-height:1.45;margin-top:2px;}
+.etl-jump{font-size:9.5px;color:var(--purple);margin-top:4px;font-weight:700;}
+
+/* ---------- Modals: replay / agent timeline / shortcuts / tutorial ---------- */
+.modal-wide{width:600px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;}
+.modal-scroll{flex:1;overflow-y:auto;font-size:12px;line-height:1.5;color:var(--text-dim);}
+.modal-scroll b{color:var(--text);}
+.replay-head{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;}
+.replay-cell{background:var(--bg-secondary);border:1px solid var(--border);border-radius:9px;padding:7px 9px;}
+.replay-cell .pf-label{margin-bottom:2px;}
+.replay-cell b{font-size:13px;color:var(--text);}
+kbd{
+  background:var(--bg-secondary);border:1px solid var(--border);border-bottom-width:2px;
+  border-radius:5px;padding:2px 8px;font:600 11px inherit;color:var(--text);white-space:nowrap;
+}
+.sc-row{display:flex;justify-content:space-between;align-items:center;padding:8px 2px;border-bottom:1px dashed var(--border);font-size:12.5px;}
+.sc-row:last-child{border-bottom:none;}
+.sc-row .sc-what{color:var(--text-dim);}
+.tut-step{text-align:center;padding:8px 6px;}
+.tut-icon{font-size:40px;margin-bottom:10px;}
+.tut-title{font-size:16px;font-weight:700;color:var(--text);margin-bottom:8px;}
+.tut-text{font-size:12.5px;color:var(--text-dim);line-height:1.6;}
+.tut-dots{display:flex;gap:6px;justify-content:center;margin:16px 0 4px;}
+.tut-dot{width:8px;height:8px;border-radius:50%;background:var(--border);transition:background .2s;}
+.tut-dot.on{background:var(--purple);}
+
+/* ---------- Social network graph drawer ---------- */
+.graph-legend{
+  display:flex;gap:14px;flex-wrap:wrap;padding:10px 18px;border-top:1px solid var(--border);
+  font-size:10.5px;color:var(--text-dim);background:var(--bg-secondary);
+}
+.graph-legend span{display:inline-flex;align-items:center;gap:5px;}
+.gl-line{display:inline-block;width:16px;height:0;border-top:2px solid;}
+.gl-line.friend{border-color:var(--green);}
+.gl-line.enemy{border-color:var(--red);}
+.gl-line.idol{border-color:var(--yellow);border-top-style:dashed;}
+.graph-hint{font-size:10.5px;color:var(--text-dim);padding:8px 18px;border-top:1px solid var(--border);}
+
+/* ---------- "you" badge on agent rows ---------- */
+.you-badge{
+  font-size:8.5px;font-weight:800;padding:1px 6px;border-radius:4px;letter-spacing:.5px;
+  background:rgba(167,139,250,.15);color:var(--purple);border:1px solid rgba(167,139,250,.35);
+  margin-left:5px;vertical-align:1px;
+}
 </style>
 </head>
 <body>
+<script>
+/* Apply saved theme before first paint to avoid a dark flash. */
+try{if(localStorage.getItem('ats_theme')==='light')document.body.classList.add('light');}catch(e){}
+</script>
 
 <div class="bg-glow"><div class="glow-orb orb-1"></div><div class="glow-orb orb-2"></div></div>
 
 <!-- Top bar -->
 <div class="topbar">
   <span class="logo">AI Trading Society</span>
-  <span class="top-stat"><span class="live-dot"></span><span id="topRound">Round 0 / 0</span></span>
+  <span class="round-progress">
+    <span class="rp-bar"><span class="rp-fill" id="rpFill"></span></span>
+    <span class="rp-label" id="topRound">Round 0 / 0</span>
+  </span>
   <span class="spacer"></span>
+  <button class="btn" onclick="openGraphPanel()" title="Agent social network (friends / idols / enemies)">🕸 Network</button>
+  <button class="btn" id="btnTheme" onclick="toggleTheme()" title="Toggle light / dark mode">🌙</button>
+  <button class="btn" onclick="exportReport()" title="Export a self-contained HTML report (charts, rankings, event timeline, decision logs)">📥 Report</button>
   <button class="btn" onclick="goHome()" title="Back to Home">Home</button>
   <button class="btn" id="btnSettings" onclick="openSettingsPanel()" title="Market Settings">Settings</button>
 </div>
@@ -565,16 +700,41 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
         <span class="sp-change" id="spChange">—</span>
       </div>
       <div class="sp-stats">
-        <div class="sp-stat"><span class="sp-label">Volume</span><span class="sp-val" id="spVolume">—</span></div>
-        <div class="sp-stat"><span class="sp-label">Volatility</span><span class="sp-val" id="spVolat">—</span></div>
-        <div class="sp-stat"><span class="sp-label">High</span><span class="sp-val" id="spHigh">—</span></div>
-        <div class="sp-stat"><span class="sp-label">Low</span><span class="sp-val" id="spLow">—</span></div>
-        <div class="sp-stat"><span class="sp-label">Mkt Cap</span><span class="sp-val" id="spMktCap">—</span></div>
+        <div class="sp-stat" title="Total shares traded this round (matched volume between buyers and sellers)."><span class="sp-label">Volume</span><span class="sp-val" id="spVolume">—</span></div>
+        <div class="sp-stat" title="Recent price swing level, from average absolute price change over the last 10 rounds."><span class="sp-label">Volatility</span><span class="sp-val" id="spVolat">—</span></div>
+        <div class="sp-stat" title="Highest price reached so far in this simulation."><span class="sp-label">High</span><span class="sp-val" id="spHigh">—</span></div>
+        <div class="sp-stat" title="Lowest price reached so far in this simulation."><span class="sp-label">Low</span><span class="sp-val" id="spLow">—</span></div>
+        <div class="sp-stat" title="Market cap = current price × total shares held by all agents."><span class="sp-label">Mkt Cap</span><span class="sp-val" id="spMktCap">—</span></div>
       </div>
       <div class="sp-chart-wrap">
         <canvas id="candleChart"></canvas>
         <div class="candle-tip" id="candleTip"></div>
       </div>
+    </div>
+    <!-- Player trading panel -->
+    <div class="card" id="portfolioCard">
+      <div class="card-title">💼 Your Portfolio <span class="badge" id="pfStockBadge">Stock 1</span></div>
+      <div class="pf-grid">
+        <div class="pf-cell"><span class="pf-label">Cash</span><span class="pf-val" id="pfCash">—</span></div>
+        <div class="pf-cell"><span class="pf-label">Shares</span><span class="pf-val" id="pfShares">—</span></div>
+        <div class="pf-cell"><span class="pf-label">Wealth</span><span class="pf-val" id="pfWealth">—</span></div>
+        <div class="pf-cell"><span class="pf-label">Return</span><span class="pf-val" id="pfReturn">—</span></div>
+      </div>
+      <div class="pf-actions">
+        <input class="pf-qty" id="pfQty" type="number" min="0" step="1" placeholder="Qty" title="Number of shares">
+        <div class="pf-side" title="Quick-fill percentages use this side (buying power or holdings)">
+          <button type="button" id="pfSideBuy" class="active" onclick="setPfSide('buy')">Buy side</button>
+          <button type="button" id="pfSideSell" onclick="setPfSide('sell')">Sell side</button>
+        </div>
+        <button class="pf-chip" onclick="fillPfQty(0.25)">25%</button>
+        <button class="pf-chip" onclick="fillPfQty(0.5)">50%</button>
+        <button class="pf-chip" onclick="fillPfQty(1)">Max</button>
+        <span style="flex:1"></span>
+        <button class="btn btn-sm btn-buy" id="pfBuyBtn" onclick="submitPlayerAction('buy')">▲ Buy</button>
+        <button class="btn btn-sm btn-sell" id="pfSellBtn" onclick="submitPlayerAction('sell')">▼ Sell</button>
+      </div>
+      <div class="pf-queued" id="pfQueued"></div>
+      <div class="pf-note">Orders are queued and execute on the next round · fees &amp; slippage apply.</div>
     </div>
     <div class="card" id="agentsCard">
       <div class="card-title">
@@ -593,8 +753,17 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
   <div class="col">
     <div class="card">
       <div class="card-title">⚡ Events &amp; Activity <span class="badge" id="eventCount">0</span></div>
-      <div id="activeEvents" class="ae-strip"></div>
-      <div class="timeline" id="timeline"><div class="empty-hint">No events or activity yet.</div></div>
+      <div class="tab-row">
+        <button class="tab-btn active" id="tabLive" onclick="switchEventTab('live')">Live Feed</button>
+        <button class="tab-btn" id="tabTimeline" onclick="switchEventTab('timeline')">📜 Timeline</button>
+      </div>
+      <div id="tabPaneLive">
+        <div id="activeEvents" class="ae-strip"></div>
+        <div class="timeline" id="timeline"><div class="empty-hint">No events or activity yet.</div></div>
+      </div>
+      <div id="tabPaneTimeline" style="display:none;">
+        <div class="timeline" id="eventTimeline"><div class="empty-hint">No events yet — they will appear here as rounds advance.</div></div>
+      </div>
     </div>
     <div class="card">
       <div class="card-title">🏆 Leaderboard</div>
@@ -608,7 +777,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
   <span class="status-chip"><span class="live-dot"></span><b id="statusStockName">Stock 1</b>&nbsp;·&nbsp;$<span id="statusStockPrice">—</span></span>
   <span class="status-chip">🤖 <b id="statusAgents">0/0</b>&nbsp;AI agents active</span>
   <span class="spacer"></span>
-  <span class="shortcut-hint" id="statusShortcut"><b>Space</b> Next · <b>A</b> Auto · <b>S</b> End · <b>C</b> Chat</span>
+  <button class="btn btn-sm" id="btnShortcuts" onclick="toggleShortcutsModal()" title="Keyboard shortcuts (press ?)">⌨ ? Shortcuts</button>
   <button class="btn btn-primary btn-sm" id="btnStep" onclick="runStep()">Next Round ▶</button>
   <button class="btn btn-sm" id="btnAuto" onclick="toggleAuto()">▶ Auto</button>
   <select class="speed-select" id="speedSelect" title="Auto-play speed" onchange="onSpeedChange()">
@@ -666,7 +835,98 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
     <div class="modal-actions">
       <button class="btn btn-sm" onclick="closeModal('resultsModal')">Close</button>
       <button class="btn btn-sm" onclick="restartSim()">↻ Restart</button>
+      <button class="btn btn-sm" onclick="exportReport()">📥 Report</button>
+      <button class="btn btn-sm" onclick="copyReportLink()" title="Export the report (if needed) and copy its read-only share URL to the clipboard">🔗 Copy Link</button>
       <button class="btn btn-sm btn-primary" onclick="goHome()">New Simulation</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: share link (manual copy fallback) -->
+<div class="modal-overlay" id="shareLinkModal">
+  <div class="modal-card" style="width:520px;max-width:92vw;">
+    <div class="modal-title">🔗 Share This Report</div>
+    <div class="modal-body">
+      Copy this read-only snapshot link and share it (anyone on this server can open it):
+      <div style="margin-top:8px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:9px 11px;font-size:11px;word-break:break-all;user-select:all;" id="shareLinkBody"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeModal('shareLinkModal')">Close</button>
+      <button class="btn btn-sm btn-primary" onclick="closeModal('shareLinkModal');window.open(document.getElementById('shareLinkBody').textContent,'_blank')">Open Report ↗</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: round replay (event timeline jump target) -->
+<div class="modal-overlay" id="replayModal">
+  <div class="modal-card modal-wide">
+    <div class="modal-title" id="replayTitle">Round —</div>
+    <div class="modal-body modal-scroll" id="replayBody" style="margin-bottom:14px;"></div>
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="replayNav(-1)">◀ Prev</button>
+      <button class="btn btn-sm" onclick="replayNav(1)">Next ▶</button>
+      <span style="flex:1"></span>
+      <button class="btn btn-sm" onclick="closeModal('replayModal')">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: agent timeline (decision log) -->
+<div class="modal-overlay" id="agentTimelineModal">
+  <div class="modal-card modal-wide">
+    <div class="modal-title" id="tlTitle">Agent timeline</div>
+    <div class="modal-body modal-scroll" id="tlBody" style="margin-bottom:14px;"></div>
+    <div class="modal-actions"><button class="btn btn-sm" onclick="closeModal('agentTimelineModal')">Close</button></div>
+  </div>
+</div>
+
+<!-- Modal: keyboard shortcuts -->
+<div class="modal-overlay" id="shortcutsModal">
+  <div class="modal-card" style="width:380px;max-width:92vw;">
+    <div class="modal-title">⌨ Keyboard Shortcuts</div>
+    <div class="modal-body" style="margin-bottom:14px;">
+      <div class="sc-row"><span class="sc-what">Advance one round</span><kbd>Space</kbd></div>
+      <div class="sc-row"><span class="sc-what">Toggle auto-play</span><kbd>A</kbd></div>
+      <div class="sc-row"><span class="sc-what">End simulation</span><kbd>S</kbd></div>
+      <div class="sc-row"><span class="sc-what">Open agent chat</span><kbd>C</kbd></div>
+      <div class="sc-row"><span class="sc-what">Social network graph</span><kbd>N</kbd></div>
+      <div class="sc-row"><span class="sc-what">Export HTML report</span><kbd>E</kbd></div>
+      <div class="sc-row"><span class="sc-what">Show this list</span><kbd>?</kbd></div>
+      <div class="sc-row"><span class="sc-what">Close modals / drawers</span><kbd>Esc</kbd></div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:10px;font-style:italic;">Shortcuts are disabled while typing in an input, or while Ctrl / Alt / Meta is held.</div>
+    </div>
+    <div class="modal-actions"><button class="btn btn-sm" onclick="closeModal('shortcutsModal')">Close</button></div>
+  </div>
+</div>
+
+<!-- Modal: first-visit tutorial -->
+<div class="modal-overlay" id="tutorialModal">
+  <div class="modal-card" style="width:420px;max-width:92vw;">
+    <div class="tut-step" id="tutStep"></div>
+    <div class="tut-dots" id="tutDots"></div>
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="skipTutorial()">Skip</button>
+      <button class="btn btn-sm btn-primary" id="tutNextBtn" onclick="tutNext()">Next ▶</button>
+    </div>
+  </div>
+</div>
+
+<!-- Drawer: agent social network graph -->
+<div class="social-overlay" id="graphOverlay" onclick="if(event.target===this)closeGraphPanel()">
+  <div class="social-drawer" style="width:540px;">
+    <div class="social-head">
+      <span style="font-size:18px;">🕸</span>
+      <span class="s-title">Agent Social Network</span>
+      <button class="s-close" onclick="closeGraphPanel()">✕</button>
+    </div>
+    <div style="flex:1;position:relative;min-height:0;">
+      <canvas id="graphCanvas" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
+    </div>
+    <div class="graph-legend">
+      <span><span class="gl-line friend"></span>friend</span>
+      <span><span class="gl-line idol"></span>idol (admires)</span>
+      <span><span class="gl-line enemy"></span>enemy</span>
+      <span style="margin-left:auto;font-style:italic;">drag nodes to rearrange</span>
     </div>
   </div>
 </div>
@@ -736,6 +996,7 @@ let sim={
   running:false,busy:false,thinking:false,round:0,total:0,agents:{},priceHistory:[],
   autoTimer:null,autoInterval:2000,agentColors:{},timelineItems:[],expandedAgent:null,socialData:null,
   selectedStock:'Stock 1',initialPrice:100,lastVolume:null,prevActions:{},
+  history:[],playerQueued:null,pfSide:'buy',eventTab:'live',lastShownPrice:null,replayRound:null,tlAgentId:null,
 };
 
 /* Currently listed stocks (single-stock market for now). */
@@ -855,9 +1116,17 @@ async function startSim(opts){
   const fee=parseFloat(cfg.fee||0.001);
   const slip=parseFloat(cfg.slip||0.001);
   const socialInfluence=parseFloat(cfg.social_influence||0);
+  // Multi-stock config: [{name, price, hold}, ...] from the homepage.
+  const stocks=(Array.isArray(cfg.stocks)?cfg.stocks:[])
+    .map(s=>({
+      name:String(s.name||s.symbol||'').trim(),
+      price:s.price!==undefined?s.price:s.initial_price,
+      hold:s.hold!==undefined?s.hold:s.initial_holdings,
+    }))
+    .filter(s=>s.name);
 
   try{
-    const resp=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({steps,api_key:apiKey,traders,price,cash,hold,fee,slip,social_influence:socialInfluence,...(opts||{})})});
+    const resp=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({steps,api_key:apiKey,traders,price,cash,hold,fee,slip,social_influence:socialInfluence,player_participates:cfg.player_participates!==false,stocks,...(opts||{})})});
     const data=await resp.json();
     if(data.error){showError(data.error);return;}
 
@@ -874,6 +1143,9 @@ async function startSim(opts){
     sim.expandedAgent=null;
     sim.socialData=null;
     sim.prevActions={};
+    sim.history=[];
+    sim.playerQueued=null;
+    sim.lastShownPrice=null;
 
     (data.roster||[]).forEach(a=>{sim.agents[a.id]={...a,return_pct:0,action:'—',requested:0,filled:0};});
     const colors=['#a78bfa','#60a5fa','#22c55e','#eab308','#ef4444','#f97316','#06b6d4','#ec4899'];
@@ -886,8 +1158,11 @@ async function startSim(opts){
     renderAgents(Object.values(sim.agents));
     renderActiveEvents([]);
     renderFeed();
+    renderEventTimeline();
+    renderPortfolio();
     updateTopBar();
     document.getElementById('agentCount').textContent=Object.keys(sim.agents).length;
+    document.getElementById('pfStockBadge').textContent=sim.selectedStock;
     loadSocialData();
     requestAnimationFrame(()=>{drawCandles();});
 
@@ -941,7 +1216,8 @@ async function runStep(){
     // Feed entries.
     if(data.events&&data.events.length>0){
       data.events.forEach(ev=>{
-        sim.timelineItems.push({type:'event',round:sim.round,name:ev.name,description:ev.description,price_impact:ev.price_impact});
+        sim.timelineItems.push({type:'event',round:sim.round,name:ev.name,description:ev.description,
+          price_impact:ev.price_impact,scope:ev.scope||'global',stock:ev.stock||null,etype:ev.type||''});
       });
     }
     if(data.agents){
@@ -952,10 +1228,24 @@ async function runStep(){
       });
     }
 
+    // Snapshot this round for replay / agent timelines / report context.
+    sim.history.push({
+      step:sim.round,price:data.price,change_pct:data.change_pct||0,volume:data.volume||0,
+      total_buy:data.total_buy||0,total_sell:data.total_sell||0,
+      events:data.events||[],
+      agents:(data.agents||[]).map(a=>({id:a.id,action:a.action,requested:a.requested,filled:a.filled,
+        reasoning:a.reasoning,wealth:a.wealth,delta:a.delta,return_pct:a.return_pct,is_player:a.is_player,cash:a.cash,holdings:a.holdings})),
+    });
+
+    // A queued player order (if any) took effect this round.
+    sim.playerQueued=null;
+
     renderAgents(Object.values(sim.agents));
     renderRankingFromAgents(Object.values(sim.agents));
     renderActiveEvents(data.active_events);
     renderFeed();
+    renderEventTimeline();
+    renderPortfolio();
     updateTopBar();
 
     if(data.is_last){
@@ -996,10 +1286,11 @@ function renderRankingFromAgents(agents){
     const ret=a.return_pct||0;
     const retCls=ret>=0?'pos':'neg';
     const retStr=ret>=0?'+'+ret.toFixed(2):ret.toFixed(2);
-    return `<div class="rank-row">
+    const you=a.is_player?'<span class="you-badge">you</span>':'';
+    return `<div class="rank-row" data-agent="${escapeHtml(a.id)}" onclick="focusAgent(this.dataset.agent)" title="Open this agent's card">
       <span class="rank-num">${i+1}</span>
       <span class="agent-dot" style="background:${sim.agentColors[a.id]||'#888'};color:${sim.agentColors[a.id]||'#888'};"></span>
-      <span class="rank-name">${escapeHtml(a.id)}</span>
+      <span class="rank-name">${escapeHtml(a.id)}${you}</span>
       <span class="rank-wealth">$${(a.wealth||0).toFixed(0)}</span>
       <span class="rank-ret ${retCls}">${retStr}%</span>
     </div>`;
@@ -1072,11 +1363,14 @@ function agentRowHtml(a,flash){
 
     detail=`<div class="ar-detail">
       ${reasoning?`<div class="ar-reasoning${a.error?' error':''}">${escapeHtml(reasoning)}</div>`:''}
-      <div><span class="ar-personality" style="background:${pc.bg};color:${pc.color};">${personality}</span></div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <span class="ar-personality" style="background:${pc.bg};color:${pc.color};">${personality}</span>
+        <button class="pf-chip" onclick="event.stopPropagation();openAgentTimeline('${escapeHtml(a.id).replace(/'/g,'&#39;')}')" title="Every decision this agent made, round by round">📋 Timeline</button>
+      </div>
       ${desc?`<div class="ar-desc">${escapeHtml(desc)}</div>`:''}
       <div class="ar-grid">
         <span class="k">Cash</span><b>$${(a.cash||0).toFixed(0)}</b>
-        <span class="k">Holdings</span><b>${(a.holdings||0).toFixed(1)}</b>
+        <span class="k">Holdings</span><b>${holdingQty(a).toFixed(1)}</b>
         <span class="k">Wealth</span><b>$${(a.wealth||0).toFixed(0)}</b>
         <span class="k">Return</span><b class="${retCls}">${retStr}%</b>
         <span class="k">Round Δ</span><b class="${delta>=0?'pos':'neg'}">${delta>=0?'+':''}${delta.toFixed(0)}</b>
@@ -1087,10 +1381,11 @@ function agentRowHtml(a,flash){
     </div>`;
   }
 
+  const youBadge=a.is_player?'<span class="you-badge">you</span>':'';
   return `<div class="agent-row${expanded?' expanded':''}${flash?' flash':''}" data-agent="${escapeHtml(a.id)}" onclick="toggleAgentRow(this.dataset.agent)">
     <div class="ar-main">
       <span class="agent-dot" style="background:${color};color:${color};"></span>
-      <span class="ar-name">${escapeHtml(a.id)}</span>
+      <span class="ar-name">${escapeHtml(a.id)}${youBadge}</span>
       <span class="ar-type">${pshort}</span>
       <span class="ar-action ${actionCls}">${action}</span>
       <span class="ar-wealth">$${(a.wealth||0).toFixed(0)}</span>
@@ -1174,6 +1469,13 @@ function updateStockPanel(){
   const priceEl=document.getElementById('spPrice');
   priceEl.textContent='$'+cur.toFixed(2);
   priceEl.className='sp-price '+cls;
+  // Flash the price when it changes: green pulse up, red pulse down.
+  if(sim.lastShownPrice!==null&&Math.abs(cur-sim.lastShownPrice)>1e-9){
+    priceEl.classList.remove('flash-up','flash-down');
+    void priceEl.offsetWidth; // restart the CSS animation
+    priceEl.classList.add(cur>=sim.lastShownPrice?'flash-up':'flash-down');
+  }
+  sim.lastShownPrice=cur;
 
   document.getElementById('spChange').innerHTML=
     `<span class="${cls}">${up?'▲':'▼'} ${up?'+':''}${chg.toFixed(2)} (${up?'+':''}${pct.toFixed(2)}%)</span>`;
@@ -1195,7 +1497,7 @@ function updateStockPanel(){
   }
 
   // Market cap = current price × total outstanding shares.
-  const totalShares=Object.values(sim.agents).reduce((s,a)=>s+(a.holdings||0),0);
+  const totalShares=Object.values(sim.agents).reduce((s,a)=>s+holdingQty(a),0);
   document.getElementById('spMktCap').textContent=
     totalShares>0?'$'+(cur*totalShares).toLocaleString(undefined,{maximumFractionDigits:0}):'—';
 
@@ -1268,6 +1570,13 @@ function drawCandles(){
   }
 
   // Candles: each round is one candle (open = previous close).
+  // Map each round to its triggered events for ⚡ markers + hover tooltips.
+  const eventsByRound={};
+  sim.timelineItems.forEach(it=>{
+    if(it.type==='event'&&it.name){
+      (eventsByRound[it.round]=eventsByRound[it.round]||[]).push(it);
+    }
+  });
   const n=prices.length-1;
   const slot=cw/n;
   const bw=Math.max(2,Math.min(16,Math.floor(slot*0.62)));
@@ -1286,7 +1595,8 @@ function drawCandles(){
     // Body
     ctx.fillStyle=color;
     ctx.fillRect(x-bw/2,top,bw,hgt);
-    rects.push({x0:padL+slot*(i-1),x1:padL+slot*i,round:sim.priceHistory[i].round,o,c,up,volume:vols[i]||0});
+    rects.push({x0:padL+slot*(i-1),x1:padL+slot*i,round:sim.priceHistory[i].round,o,c,up,volume:vols[i]||0,
+      events:eventsByRound[sim.priceHistory[i].round]||null});
   }
 
   // Moving average line (5-period MA of close prices) overlaid on candles.
@@ -1315,6 +1625,25 @@ function drawCandles(){
       ctx.fillText('MA5',padL+15,priceTop+11);
     }
   }
+
+  // Event markers: ⚡ above candles at rounds where events triggered.
+  // Blue = market-wide event, yellow = single-stock event.
+  rects.forEach(r=>{
+    if(!r.events||r.events.length===0)return;
+    const cx=(r.x0+r.x1)/2;
+    const my=priceTop+16;
+    const anyGlobal=r.events.some(ev=>(ev.scope||'global')==='global');
+    const mcol=anyGlobal?'#60a5fa':'#eab308';
+    ctx.font='11px Segoe UI,system-ui,sans-serif';
+    ctx.textAlign='center';
+    // Halo so the glyph reads on any background.
+    ctx.strokeStyle='rgba(11,14,20,.85)';
+    ctx.lineWidth=3;
+    ctx.strokeText('⚡',cx,my);
+    ctx.fillStyle=mcol;
+    ctx.fillText('⚡',cx,my);
+    r.markerX=cx;
+  });
 
   // Volume bars (bottom sub-chart), colored by candle direction.
   const maxVol=Math.max(1,...vols.slice(1));
@@ -1381,9 +1710,18 @@ function bindCandleHover(){
     const c=candleGeom.rects.find(r=>x>=r.x0&&x<r.x1);
     if(!c){tip.style.display='none';return;}
     const chg=c.o>0?((c.c-c.o)/c.o)*100:0;
+    let evHtml='';
+    if(c.events&&c.events.length){
+      evHtml='<br>'+c.events.map(ev=>{
+        const imp=(ev.price_impact||0)*100;
+        const cls=imp>=0?'pos':'neg';
+        const scope=ev.scope==='global'?' · market-wide':' · '+ev.stock;
+        return `⚡ <b>${escapeHtml(ev.name)}</b>${escapeHtml(scope)} <span class="${cls}">${imp>=0?'+':''}${imp.toFixed(1)}%</span>`;
+      }).join('<br>');
+    }
     tip.innerHTML=`<b>Round ${c.round}</b><br>O $${c.o.toFixed(2)} · C $${c.c.toFixed(2)}<br>`+
       `Vol: ${(c.volume||0).toLocaleString()}<br>`+
-      `<span class="${c.up?'pos':'neg'}">${c.up?'▲':'▼'} ${chg>=0?'+':''}${chg.toFixed(2)}%</span>`;
+      `<span class="${c.up?'pos':'neg'}">${c.up?'▲':'▼'} ${chg>=0?'+':''}${chg.toFixed(2)}%</span>${evHtml}`;
     tip.style.display='block';
     const wrap=canvas.parentElement;
     const tx=Math.min(Math.max(x-58,6),Math.max(6,wrap.clientWidth-136));
@@ -1451,8 +1789,10 @@ function renderFeed(){
 /* Show a forced event immediately: feed entry + toast. */
 function addForcedEvent(ev){
   if(!ev||!ev.name)return;
-  sim.timelineItems.push({type:'event',round:Math.max(sim.round,1),name:ev.name,description:ev.description,price_impact:ev.price_impact});
+  sim.timelineItems.push({type:'event',round:Math.max(sim.round,1),name:ev.name,description:ev.description,
+    price_impact:ev.price_impact,scope:ev.scope||'global',stock:ev.stock||null,etype:ev.type||''});
   renderFeed();
+  renderEventTimeline();
   showToast(`${ev.name}: ${ev.description||''}`,'event');
 }
 
@@ -1473,6 +1813,494 @@ function showEventConfirm(name,desc){
     forceEvent(name,desc);
   };
   document.getElementById('eventModal').classList.add('show');
+}
+
+/* =========================================================
+   Helpers: holdings may be a number (legacy) or {symbol: qty}.
+   ========================================================= */
+function holdingQty(a){
+  if(!a)return 0;
+  const h=a.holdings;
+  if(h==null)return 0;
+  if(typeof h==='number')return h;
+  if(typeof h==='object')return Object.values(h).reduce((s,v)=>s+(v||0),0);
+  return 0;
+}
+function playerAgent(){
+  return Object.values(sim.agents).find(a=>a.is_player||a.id==='Player (You)')||null;
+}
+
+/* =========================================================
+   Your Portfolio — player trading panel (P0)
+   ========================================================= */
+function renderPortfolio(){
+  const p=playerAgent();
+  const cashEl=document.getElementById('pfCash');
+  if(!cashEl)return;
+  if(!p){['pfCash','pfShares','pfWealth','pfReturn'].forEach(id=>{document.getElementById(id).textContent='—';});return;}
+  document.getElementById('pfCash').textContent='$'+(p.cash||0).toLocaleString(undefined,{maximumFractionDigits:0});
+  document.getElementById('pfShares').textContent=holdingQty(p).toFixed(0);
+  document.getElementById('pfWealth').textContent='$'+(p.wealth||0).toLocaleString(undefined,{maximumFractionDigits:0});
+  const ret=p.return_pct||0;
+  const retEl=document.getElementById('pfReturn');
+  retEl.textContent=(ret>=0?'+':'')+ret.toFixed(2)+'%';
+  retEl.className='pf-val '+(ret>=0?'pos':'neg');
+
+  const q=document.getElementById('pfQueued');
+  if(sim.playerQueued){
+    q.textContent=`⏳ Queued: ${sim.playerQueued.action.toUpperCase()} ${sim.playerQueued.qty} ${sim.selectedStock} — executes next round`;
+    q.classList.add('show');
+  }else{
+    q.classList.remove('show');
+  }
+}
+
+function setPfSide(side){
+  sim.pfSide=side;
+  document.getElementById('pfSideBuy').classList.toggle('active',side==='buy');
+  document.getElementById('pfSideSell').classList.toggle('active',side==='sell');
+}
+
+function fillPfQty(frac){
+  const p=playerAgent();
+  const price=currentPrice();
+  let max;
+  if(sim.pfSide==='sell'){
+    max=holdingQty(p);
+  }else{
+    max=price>0?Math.floor((p?(p.cash||0):0)/price):0;
+  }
+  document.getElementById('pfQty').value=Math.max(0,Math.floor(max*frac));
+}
+
+async function submitPlayerAction(action){
+  if(!sim.running){showToast('Simulation is not running — start a new one first.','error');return;}
+  const qtyEl=document.getElementById('pfQty');
+  const qty=parseInt(qtyEl.value,10);
+  if(!qty||qty<=0){showToast('Enter a quantity greater than 0 first.','error');qtyEl.focus();return;}
+  if(action==='sell'){
+    const p=playerAgent();
+    if(holdingQty(p)<qty){showToast(`You only hold ${holdingQty(p).toFixed(0)} shares.`,'error');return;}
+  }
+  try{
+    const resp=await fetch('/api/player_action',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({action,quantity:qty,name:sim.selectedStock}),
+    });
+    const data=await resp.json();
+    if(data.error){showError(data.error);return;}
+    sim.playerQueued={action,qty};
+    renderPortfolio();
+    showToast(`Order queued: ${action.toUpperCase()} ${qty} — it executes on the next round.`,'success');
+  }catch(e){showError('Order failed: '+e.message);}
+}
+
+/* =========================================================
+   Leaderboard → agent card linkage (P3)
+   ========================================================= */
+function focusAgent(id){
+  if(!sim.agents[id])return;
+  sim.expandedAgent=id;
+  renderAgents(Object.values(sim.agents));
+  const row=document.querySelector(`.agent-row[data-agent="${CSS.escape(id)}"]`);
+  if(row){
+    row.scrollIntoView({behavior:'smooth',block:'center'});
+    row.classList.add('flash');
+    setTimeout(()=>row.classList.remove('flash'),900);
+  }
+}
+
+/* =========================================================
+   Event timeline tab + round replay
+   ========================================================= */
+function switchEventTab(tab){
+  sim.eventTab=tab;
+  document.getElementById('tabLive').classList.toggle('active',tab==='live');
+  document.getElementById('tabTimeline').classList.toggle('active',tab==='timeline');
+  document.getElementById('tabPaneLive').style.display=tab==='live'?'':'none';
+  document.getElementById('tabPaneTimeline').style.display=tab==='timeline'?'':'none';
+}
+
+function renderEventTimeline(){
+  const el=document.getElementById('eventTimeline');
+  if(!el)return;
+  const evs=sim.timelineItems.filter(i=>i.type==='event'&&i.name);
+  if(evs.length===0){
+    el.innerHTML='<div class="empty-hint">No events yet — they will appear here as rounds advance.</div>';
+    return;
+  }
+  // Newest round first.
+  const byRound={};
+  evs.forEach(ev=>{(byRound[ev.round]=byRound[ev.round]||[]).push(ev);});
+  el.innerHTML=Object.keys(byRound).map(Number).sort((a,b)=>b-a).map(round=>{
+    const items=byRound[round].map(ev=>{
+      const imp=(ev.price_impact||0)*100;
+      const cls=imp>=0?'pos':'neg';
+      return `<div class="etl-name">⚡ ${escapeHtml(ev.name)} <span class="${cls}">${imp>=0?'+':''}${imp.toFixed(1)}%</span></div>`+
+        (ev.description?`<div class="etl-desc">${escapeHtml(ev.description)}</div>`:'');
+    }).join('');
+    const scopes=byRound[round].map(ev=>ev.scope||'global');
+    const badge=scopes.includes('global')?'<span class="scope-badge global">global</span>':'<span class="scope-badge stock">stock</span>';
+    const stockTargets=[...new Set(byRound[round].filter(ev=>ev.scope==='stock'&&ev.stock).map(ev=>ev.stock))];
+    const target=stockTargets.length?' · '+escapeHtml(stockTargets.join(', ')):'';
+    return `<div class="etl-item" onclick="openReplay(${round})">
+      <div class="etl-round">Round ${round} ${badge}${target}</div>
+      ${items}
+      <div class="etl-jump">▸ view round state</div>
+    </div>`;
+  }).join('');
+}
+
+function openReplay(round){
+  const snap=sim.history.find(h=>h.step===round);
+  if(!snap){showToast('No snapshot for that round yet.','error');return;}
+  sim.replayRound=round;
+  renderReplay(snap);
+  document.getElementById('replayModal').classList.add('show');
+}
+
+function replayNav(d){
+  if(sim.replayRound==null)return;
+  const next=sim.replayRound+d;
+  if(next<1||!sim.history.some(h=>h.step===next))return;
+  openReplay(next);
+}
+
+function renderReplay(snap){
+  document.getElementById('replayTitle').textContent=`⏪ Round ${snap.step} of ${sim.total}`;
+  const chg=snap.change_pct||0;
+  const chgCls=chg>=0?'pos':'neg';
+  const eventsHtml=(snap.events&&snap.events.length)
+    ?snap.events.map(ev=>{
+      const imp=(ev.price_impact||0)*100;
+      const cls=imp>=0?'pos':'neg';
+      const scope=ev.scope||'global';
+      const badge=scope==='global'?'<span class="scope-badge global">global</span>':`<span class="scope-badge stock">stock</span>`;
+      return `<div class="etl-item" style="cursor:default;">
+        <div class="etl-round">⚡ ${escapeHtml(ev.name)} ${badge}</div>
+        <div class="etl-desc">${escapeHtml(ev.description||'')}</div>
+        <div class="etl-name" style="margin-top:3px;"><span class="${cls}">${imp>=0?'+':''}${imp.toFixed(1)}% price impact</span>${ev.stock?' · '+escapeHtml(ev.stock):''}</div>
+      </div>`;
+    }).join('')
+    :'<div class="empty-hint">No events fired this round.</div>';
+
+  const agents=[...(snap.agents||[])].sort((a,b)=>(b.wealth||0)-(a.wealth||0));
+  const agentRows=agents.map(a=>{
+    const act=String(a.action||'hold').toLowerCase();
+    const ret=a.return_pct||0;
+    const delta=a.delta||0;
+    const you=a.is_player?'<span class="you-badge">you</span>':'';
+    return `<tr>
+      <td><span class="agent-dot" style="background:${sim.agentColors[a.id]||'#888'};color:${sim.agentColors[a.id]||'#888'};display:inline-block;"></span> ${escapeHtml(a.id)}${you}</td>
+      <td><span class="ar-action ${act}">${act.toUpperCase()}</span></td>
+      <td class="num">${a.filled||0}</td>
+      <td class="num">$${(a.wealth||0).toFixed(0)}</td>
+      <td class="num ${delta>=0?'pos':'neg'}">${delta>=0?'+':''}${delta.toFixed(0)}</td>
+      <td class="num ${ret>=0?'pos':'neg'}">${ret>=0?'+':''}${ret.toFixed(1)}%</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('replayBody').innerHTML=`
+    <div class="replay-head">
+      <div class="replay-cell"><span class="pf-label">Price</span><b>$${(snap.price||0).toFixed(2)}</b></div>
+      <div class="replay-cell"><span class="pf-label">Change</span><b class="${chgCls}">${chg>=0?'+':''}${chg.toFixed(2)}%</b></div>
+      <div class="replay-cell"><span class="pf-label">Volume</span><b>${(snap.volume||0).toLocaleString()}</b></div>
+      <div class="replay-cell"><span class="pf-label">Buy / Sell</span><b><span class="pos">${snap.total_buy||0}</span> / <span class="neg">${snap.total_sell||0}</span></b></div>
+    </div>
+    <div style="font-size:11px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin:4px 0 8px;">⚡ Events</div>
+    ${eventsHtml}
+    <div style="font-size:11px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.5px;margin:14px 0 8px;">🤖 Agents (click a name in the Agents panel for full history)</div>
+    <table><thead><tr><th>Agent</th><th>Action</th><th class="num">Qty</th><th class="num">Wealth</th><th class="num">Δ</th><th class="num">Return</th></tr></thead>
+    <tbody>${agentRows}</tbody></table>`;
+}
+
+/* =========================================================
+   Agent timeline — per-round decision log
+   ========================================================= */
+function openAgentTimeline(id){
+  sim.tlAgentId=id;
+  const color=sim.agentColors[id]||'#888';
+  const rows=sim.history.map(h=>{
+    const a=h.agents.find(x=>x.id===id);
+    return a?{round:h.step,...a}:null;
+  }).filter(Boolean);
+  const a=sim.agents[id]||{};
+  const ret=a.return_pct||0;
+
+  let body='';
+  if(rows.length===0){
+    body='<div class="empty-hint">No rounds recorded yet — advance the simulation first.</div>';
+  }else{
+    body=`<table><thead><tr><th>Round</th><th>Action</th><th class="num">Qty</th><th class="num">Wealth</th><th class="num">Δ</th><th class="num">Return</th></tr></thead><tbody>`+
+      rows.map(r=>{
+        const act=String(r.action||'hold').toLowerCase();
+        const d=r.delta||0;
+        const rp=r.return_pct||0;
+        const qty=(act==='buy'||act==='sell')?`${r.filled||0}${r.requested&&r.filled!==r.requested?` <span class="muted">(${r.requested} req)</span>`:''}`:'—';
+        return `<tr>
+          <td><b>${r.round}</b></td>
+          <td><span class="ar-action ${act}">${act.toUpperCase()}</span></td>
+          <td class="num">${qty}</td>
+          <td class="num">$${(r.wealth||0).toFixed(0)}</td>
+          <td class="num ${d>=0?'pos':'neg'}">${d>=0?'+':''}${d.toFixed(0)}</td>
+          <td class="num ${rp>=0?'pos':'neg'}">${rp>=0?'+':''}${rp.toFixed(1)}%</td>
+        </tr>`;
+      }).join('')+'</tbody></table>';
+  }
+  document.getElementById('tlTitle').innerHTML=
+    `<span class="agent-dot" style="background:${color};color:${color};"></span> ${escapeHtml(id)} — decision log`;
+  document.getElementById('tlBody').innerHTML=
+    `<div style="margin-bottom:10px;font-size:12px;">Personality: <b>${escapeHtml(a.personality||'—')}</b> · Wealth <b>$${(a.wealth||0).toFixed(0)}</b> · Return <b class="${ret>=0?'pos':'neg'}">${ret>=0?'+':''}${ret.toFixed(2)}%</b> · ${rows.length} rounds</div>${body}`;
+  document.getElementById('agentTimelineModal').classList.add('show');
+}
+
+/* =========================================================
+   Shortcuts modal / first-visit tutorial / export
+   ========================================================= */
+function toggleShortcutsModal(force){
+  const m=document.getElementById('shortcutsModal');
+  const show=force!==undefined?force:!m.classList.contains('show');
+  m.classList.toggle('show',show);
+}
+
+const TUT_STEPS=[
+  {icon:'📈',title:'Watch the market',text:'The middle panel shows the live candlestick chart, price stats and ⚡ event markers. Hover any candle for details; open 📜 Timeline to replay any past round.'},
+  {icon:'▶',title:'Advance rounds',text:'Press <kbd>Space</kbd> or click <b>Next Round</b> to let every AI agent decide and trade once. <b>Auto</b> plays continuously. Watch the round progress bar at the top.'},
+  {icon:'💼',title:'Trade yourself',text:'Use the <b>Your Portfolio</b> card: pick a quantity (25% / 50% / Max shortcuts help), press Buy or Sell. Your order is queued and executes on the next round. Good luck beating the AIs!'},
+];
+let tutIdx=0;
+function showTutorial(){
+  tutIdx=0;
+  renderTutStep();
+  document.getElementById('tutorialModal').classList.add('show');
+}
+function renderTutStep(){
+  const s=TUT_STEPS[tutIdx];
+  document.getElementById('tutStep').innerHTML=
+    `<div class="tut-icon">${s.icon}</div><div class="tut-title">${s.title}</div><div class="tut-text">${s.text}</div>`;
+  document.getElementById('tutDots').innerHTML=
+    TUT_STEPS.map((_,i)=>`<span class="tut-dot${i===tutIdx?' on':''}"></span>`).join('');
+  document.getElementById('tutNextBtn').textContent=tutIdx===TUT_STEPS.length-1?'Start trading ▶':'Next ▶';
+}
+function tutNext(){
+  if(tutIdx<TUT_STEPS.length-1){tutIdx++;renderTutStep();}
+  else skipTutorial();
+}
+function skipTutorial(){
+  localStorage.setItem('ats_tut_v1','seen');
+  document.getElementById('tutorialModal').classList.remove('show');
+}
+
+let lastReportUrl=null;
+async function exportReport(){
+  const dismiss=showToast('Generating report…','info',{sticky:true});
+  try{
+    const resp=await fetch('/api/report/export',{method:'POST'});
+    const data=await resp.json();
+    dismiss&&dismiss();
+    if(data.error){showError(data.error);return;}
+    lastReportUrl=data.url;
+    showToast('Report ready — opening read-only snapshot in a new tab.','success');
+    window.open(data.url,'_blank');
+  }catch(e){dismiss&&dismiss();showError('Export failed: '+e.message);}
+}
+
+async function copyReportLink(){
+  try{
+    if(!lastReportUrl){
+      const resp=await fetch('/api/report/export',{method:'POST'});
+      const data=await resp.json();
+      if(data.error){showError(data.error);return;}
+      lastReportUrl=data.url;
+    }
+    const shareUrl=new URL(lastReportUrl,window.location.href).href;
+    let copied=false;
+    if(navigator.clipboard&&window.isSecureContext){
+      await navigator.clipboard.writeText(shareUrl);copied=true;
+    }else{
+      // Fallback for plain-http (e.g. LAN) contexts without clipboard API.
+      const ta=document.createElement('textarea');
+      ta.value=shareUrl;ta.style.position='fixed';ta.style.opacity='0';
+      document.body.appendChild(ta);ta.select();
+      copied=document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    if(copied)showToast('Share link copied: '+shareUrl,'success');
+    else showSharePromptModal(shareUrl);
+  }catch(e){
+    showError('Could not copy link: '+e.message);
+  }
+}
+
+function showSharePromptModal(url){
+  document.getElementById('shareLinkBody').textContent=url;
+  document.getElementById('resultsModal').classList.remove('show');
+  document.getElementById('shareLinkModal').classList.add('show');
+}
+
+/* =========================================================
+   Agent social network — force-directed graph
+   ========================================================= */
+let graphAnim=null;
+function openGraphPanel(){
+  document.getElementById('graphOverlay').classList.add('show');
+  buildGraph();
+}
+function closeGraphPanel(){
+  document.getElementById('graphOverlay').classList.remove('show');
+  if(graphAnim){cancelAnimationFrame(graphAnim);graphAnim=null;}
+}
+
+function buildGraph(){
+  const canvas=document.getElementById('graphCanvas');
+  if(!canvas)return;
+  const agents=Object.keys(sim.agents);
+  if(agents.length===0)return;
+
+  const dpr=window.devicePixelRatio||1;
+  const sizeCanvas=()=>{
+    const w=canvas.clientWidth||480,h=canvas.clientHeight||600;
+    canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);
+    return{w,h};
+  };
+  let{w,h}=sizeCanvas();
+
+  const nodes=agents.map((id,i)=>{
+    const ang=(i/agents.length)*Math.PI*2;
+    const R=Math.min(w,h)*0.32;
+    return{id,x:w/2+Math.cos(ang)*R,y:h/2+Math.sin(ang)*R,vx:0,vy:0,
+      color:sim.agentColors[id]||'#888',isPlayer:!!(sim.agents[id]&&sim.agents[id].is_player)};
+  });
+  const byId={};nodes.forEach(n=>byId[n.id]=n);
+
+  const links=[];
+  (sim.socialData?Object.values(sim.socialData):[]).forEach(a=>{
+    if(a.idol&&byId[a.idol]&&byId[a.id])links.push({a:byId[a.id],b:byId[a.idol],type:'idol'});
+    (a.friends||[]).forEach(f=>{if(byId[f]&&byId[a.id]&&f!==a.id)links.push({a:byId[a.id],b:byId[f],type:'friend'});});
+    (a.enemies||[]).forEach(e=>{if(byId[e]&&byId[a.id]&&e!==a.id)links.push({a:byId[a.id],b:byId[e],type:'enemy'});});
+  });
+  // De-duplicate undirected friend/enemy pairs.
+  const seen=new Set();
+  const edges=links.filter(l=>{
+    const k=l.type==='idol'?`${l.type}:${l.a.id}>${l.b.id}`:[l.type,l.a.id,l.b.id].sort().join('|');
+    if(seen.has(k))return false;
+    seen.add(k);return true;
+  });
+
+  const LINK_STYLE={
+    friend:{color:'rgba(34,197,94,.55)',rest:95},
+    enemy:{color:'rgba(239,68,68,.55)',rest:150},
+    idol:{color:'rgba(234,179,8,.6)',rest:110,dash:[5,4]},
+  };
+
+  let alpha=1;
+  const step=()=>{
+    // Physics: pairwise repulsion + link springs + gravity to center.
+    for(let i=0;i<nodes.length;i++){
+      const a=nodes[i];
+      for(let j=i+1;j<nodes.length;j++){
+        const b=nodes[j];
+        let dx=a.x-b.x,dy=a.y-b.y;
+        let d2=dx*dx+dy*dy;
+        if(d2<1){dx=Math.random()-.5;dy=Math.random()-.5;d2=1;}
+        const d=Math.sqrt(d2);
+        const f=2800/d2;
+        a.vx+=dx/d*f;a.vy+=dy/d*f;
+        b.vx-=dx/d*f;b.vy-=dy/d*f;
+      }
+    }
+    edges.forEach(l=>{
+      const dx=l.b.x-l.a.x,dy=l.b.y-l.a.y;
+      const d=Math.sqrt(dx*dx+dy*dy)||1;
+      const rest=LINK_STYLE[l.type].rest;
+      const f=(d-rest)*0.012;
+      l.a.vx+=dx/d*f;l.a.vy+=dy/d*f;
+      l.b.vx-=dx/d*f;l.b.vy-=dy/d*f;
+    });
+    nodes.forEach(n=>{
+      n.vx+=(w/2-n.x)*0.004*alpha;
+      n.vy+=(h/2-n.y)*0.004*alpha;
+      n.vx*=0.85;n.vy*=0.85;
+      if(!n.drag){n.x+=n.vx;n.y+=n.vy;}
+      const r=16;
+      n.x=Math.max(r,Math.min(w-r,n.x));
+      n.y=Math.max(r,Math.min(h-r,n.y));
+    });
+    alpha*=0.997;
+
+    draw();
+    if(alpha>0.05||nodes.some(n=>Math.abs(n.vx)+Math.abs(n.vy)>0.3)){
+      graphAnim=requestAnimationFrame(step);
+    }
+  };
+
+  const draw=()=>{
+    const ctx=canvas.getContext('2d');
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    ctx.clearRect(0,0,w,h);
+    edges.forEach(l=>{
+      const st=LINK_STYLE[l.type];
+      ctx.strokeStyle=st.color;
+      ctx.lineWidth=1.6;
+      ctx.setLineDash(st.dash||[]);
+      ctx.beginPath();
+      if(l.type==='idol'){
+        // Slight curve for directed idol links.
+        const mx=(l.a.x+l.b.x)/2+(l.b.y-l.a.y)*0.08;
+        const my=(l.a.y+l.b.y)/2-(l.b.x-l.a.x)*0.08;
+        ctx.moveTo(l.a.x,l.a.y);
+        ctx.quadraticCurveTo(mx,my,l.b.x,l.b.y);
+      }else{
+        ctx.moveTo(l.a.x,l.a.y);
+        ctx.lineTo(l.b.x,l.b.y);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+    });
+    nodes.forEach(n=>{
+      ctx.beginPath();
+      ctx.arc(n.x,n.y,n.isPlayer?15:12,0,Math.PI*2);
+      ctx.fillStyle=n.color;
+      ctx.globalAlpha=.9;
+      ctx.fill();
+      ctx.globalAlpha=1;
+      if(n.isPlayer){
+        ctx.strokeStyle='#e2e8f0';ctx.lineWidth=2;
+        ctx.beginPath();ctx.arc(n.x,n.y,18,0,Math.PI*2);ctx.stroke();
+      }
+      ctx.fillStyle='#e2e8f0';
+      ctx.font='600 10px Segoe UI,system-ui,sans-serif';
+      ctx.textAlign='center';
+      const label=n.id.length>16?n.id.slice(0,15)+'…':n.id;
+      ctx.fillText(label,n.x,n.y+27);
+    });
+  };
+
+  // Drag support.
+  let dragNode=null;
+  const pos=e=>{const r=canvas.getBoundingClientRect();return{x:e.clientX-r.left,y:e.clientY-r.top};};
+  const down=e=>{
+    const p=pos(e);
+    dragNode=nodes.find(n=>Math.hypot(n.x-p.x,n.y-p.y)<18)||null;
+    if(dragNode){dragNode.drag=true;alpha=Math.max(alpha,.4);}
+  };
+  const move=e=>{
+    if(!dragNode)return;
+    const p=pos(e);
+    dragNode.x=p.x;dragNode.y=p.y;dragNode.vx=0;dragNode.vy=0;
+    draw();
+  };
+  const up=()=>{if(dragNode){dragNode.drag=false;alpha=Math.max(alpha,.3);dragNode=null;}};
+  canvas.onmousedown=down;
+  window.addEventListener('mousemove',move);
+  window.addEventListener('mouseup',up);
+
+  const onResize=()=>{
+    const s=sizeCanvas();w=s.w;h=s.h;draw();
+  };
+  window.addEventListener('resize',onResize);
+
+  step();
 }
 
 /* ---- Results ---- */
@@ -1523,7 +2351,7 @@ async function showResults(){
     if(ranks.length>0){
       html+='<div style="margin-bottom:6px;">';
       html+='<div style="font-size:12px;font-weight:700;margin-bottom:6px;">🏆 Final Leaderboard</div>';
-      html+='<table style="font-size:11px;"><thead><tr><th>#</th><th>Agent</th><th class="num">Wealth</th><th class="num">Return</th><th class="num">Sharpe</th><th class="num">MaxDD</th><th class="num">Win%</th></tr></thead><tbody>';
+      html+='<table style="font-size:11px;"><thead><tr><th>#</th><th>Agent</th><th class="num">Wealth</th><th class="num">Return</th><th class="num" title="Sharpe ratio: average return per unit of risk (std dev). Higher = better risk-adjusted performance.">Sharpe</th><th class="num" title="Volatility: standard deviation of per-round wealth returns. Higher = swingier performance.">Vol</th><th class="num" title="Max drawdown: largest peak-to-trough wealth decline, as % of peak.">MaxDD</th><th class="num" title="Win rate: share of rounds where the agent\'s wealth increased.">Win%</th></tr></thead><tbody>';
       ranks.forEach(r=>{
         const ret=r.return_pct||0;
         const retCls=ret>=0?'pos':'neg';
@@ -1534,6 +2362,7 @@ async function showResults(){
           <td class="num" style="padding:4px 6px;">$${(r.wealth||0).toFixed(0)}</td>
           <td class="num ${retCls}" style="padding:4px 6px;">${retStr}%</td>
           <td class="num muted" style="padding:4px 6px;">${(r.sharpe||0).toFixed(2)}</td>
+          <td class="num muted" style="padding:4px 6px;">${(r.volatility||0).toFixed(1)}%</td>
           <td class="num neg" style="padding:4px 6px;">${(r.max_drawdown||0).toFixed(1)}%</td>
           <td class="num muted" style="padding:4px 6px;">${(r.win_rate||0).toFixed(0)}%</td>
         </tr>`;
@@ -1712,9 +2541,20 @@ function triggerLibraryEvent(name){
 /* ---- Utility ---- */
 function updateTopBar(){
   document.getElementById('topRound').textContent=`Round ${sim.round} / ${sim.total}`;
+  const pct=sim.total>0?Math.min(100,Math.round(sim.round/sim.total*100)):0;
+  document.getElementById('rpFill').style.width=pct+'%';
+  syncPlayerPanel();
   renderStockList();
   updateStockPanel();
   updateStatusLine();
+}
+
+/* Hide the player trading panel when the human did not join as a trader. */
+function syncPlayerPanel(){
+  const card=document.getElementById('portfolioCard');
+  if(!card)return;
+  const hasPlayer=Object.values(sim.agents).some(a=>a.is_player);
+  card.style.display=hasPlayer?'':'none';
 }
 
 function updateStatusLine(){
@@ -1839,6 +2679,8 @@ function fallbackReply(){
 
 /* ---- Keyboard shortcuts ---- */
 document.addEventListener('keydown',(e)=>{
+  // Ignore shortcuts whenever a modifier is held (Ctrl+C copy, Ctrl+R reload…).
+  if(e.ctrlKey||e.altKey||e.metaKey)return;
   const t=e.target;
   const tag=t&&t.tagName?t.tagName.toUpperCase():'';
   if(tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'||(t&&t.isContentEditable))return;
@@ -1846,10 +2688,13 @@ document.addEventListener('keydown',(e)=>{
     document.querySelectorAll('.modal-overlay.show').forEach(m=>m.classList.remove('show'));
     closeChatPanel();
     closeSettingsPanel();
+    closeGraphPanel();
     return;
   }
+  if(e.key==='?'){e.preventDefault();toggleShortcutsModal();return;}
   const drawerOpen=document.getElementById('socialOverlay').classList.contains('show')
-    ||document.getElementById('settingsOverlay').classList.contains('show');
+    ||document.getElementById('settingsOverlay').classList.contains('show')
+    ||document.getElementById('graphOverlay').classList.contains('show');
   if(document.querySelector('.modal-overlay.show')||drawerOpen){
     if(e.key==='c'||e.key==='C')openChatPanel(true);
     return;
@@ -1858,7 +2703,14 @@ document.addEventListener('keydown',(e)=>{
   else if(e.key==='a'||e.key==='A'){if(sim.running)toggleAuto();}
   else if(e.key==='s'||e.key==='S'){if(sim.running)endSim();}
   else if(e.key==='c'||e.key==='C'){openChatPanel(true);}
+  else if(e.key==='n'||e.key==='N'){toggleGraphOpen();}
+  else if(e.key==='e'||e.key==='E'){exportReport();}
 });
+
+function toggleGraphOpen(){
+  const open=document.getElementById('graphOverlay').classList.contains('show');
+  if(open)closeGraphPanel();else openGraphPanel();
+}
 
 /* Blur buttons after click so a later Space press does not re-trigger them. */
 document.addEventListener('click',(e)=>{
@@ -1866,13 +2718,30 @@ document.addEventListener('click',(e)=>{
   if(b)b.blur();
 });
 
+/* ---- Theme toggle ---- */
+function applyThemeButton(){
+  const btn=document.getElementById('btnTheme');
+  if(!btn)return;
+  const light=document.body.classList.contains('light');
+  btn.textContent=light?'☀️':'🌙';
+}
+function toggleTheme(){
+  const light=document.body.classList.toggle('light');
+  try{localStorage.setItem('ats_theme',light?'light':'dark');}catch(e){}
+  applyThemeButton();
+}
+
 /* ---- Init ---- */
 window.addEventListener('DOMContentLoaded',()=>{
+  applyThemeButton();
   sim.initialPrice=parseFloat(loadConfig().price||100)||100;
   renderStockList();
   updateStockPanel();
   updateStatusLine();
   bindCandleHover();
+
+  // First-visit tutorial (3 steps), shown once per browser.
+  if(!localStorage.getItem('ats_tut_v1'))showTutorial();
 
   const apiKey=getApiKey();
   if(!apiKey){

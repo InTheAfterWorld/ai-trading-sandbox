@@ -144,6 +144,7 @@ class MarketEnv:
         self.event_manager: EventManager = EventManager(
             event_probability_multiplier=config.event_probability_multiplier,
             rng=self.rng,
+            stock_names=list(self.stocks.keys()),
         )
 
         # --- Social influence ---
@@ -153,6 +154,9 @@ class MarketEnv:
 
         # --- Player action buffer ---
         self._pending_player_actions: Dict[str, dict] = {}
+
+        # --- God Mode: persistent sentiment drift (-1..1), 0 by default ---
+        self._sentiment_drift: float = 0.0
 
     # ------------------------------------------------------------------
     # Backward-compat properties (delegate to first stock)
@@ -378,19 +382,29 @@ class MarketEnv:
         """Run one simulation step."""
         self.step_count += 1
 
-        # ---------- 0. Event system (global) ----------
+        # ---------- 0. Event system ----------
+        # Global events hit every stock; company-specific events hit one
+        # randomly chosen stock (resolved inside the event manager).
         triggered_events: list = []
         if self.event_manager:
             # Tick existing events
             self.event_manager.tick()
             # Try to trigger new events (may return multiple)
-            triggered_events = self.event_manager.try_trigger_event(self.step_count)
+            triggered_events = self.event_manager.try_trigger_event(
+                self.step_count, stock_names=list(self.stocks.keys())
+            )
 
         stock_symbols = list(self.stocks.keys())
 
         # ---------- 1. Collect orders per stock ----------
         buy_orders: Dict[str, List[Tuple[str, int]]] = {sym: [] for sym in stock_symbols}
         sell_orders: Dict[str, List[Tuple[str, int]]] = {sym: [] for sym in stock_symbols}
+        # Player orders bypass peer matching: the human trades against an
+        # implicit market maker so orders always fill (paper-trading).
+        player_orders: Dict[str, List[Tuple[str, str, int]]] = {}
+        # Per-agent remaining cash budget for this step's buy orders (cash is
+        # shared across stocks; prevents negative-cash overdrafts).
+        cash_budget: Dict[str, float] = {}
         # agent_actions[aid][sym] = {action, requested_qty, filled_qty, reasoning, error}
         agent_actions: Dict[str, Dict[str, dict]] = {
             aid: {} for aid in self.agents
@@ -413,6 +427,7 @@ class MarketEnv:
                     )
                 decisions = [
                     {
+                        "name": sym,
                         "symbol": sym,
                         "action": "hold",
                         "quantity": 0,
@@ -440,25 +455,45 @@ class MarketEnv:
                 }
 
                 sm = self.stocks[sym]
+                is_player = bool(getattr(agent, "is_player", False))
                 if action_type == "buy" and quantity > 0:
-                    # Clip quantity to the maximum affordable amount.
+                    # Clip quantity to the maximum affordable amount. Cash is
+                    # SHARED across stocks: track each agent's remaining
+                    # budget so multiple max-size buy orders in one round
+                    # cannot overdraw the account.
                     effective_price = sm.price * (
                         1.0 + self.config.slippage_rate
                     ) * (1.0 + self.config.fee_rate)
-                    if sm.price > 0 and agent.cash > 0 and effective_price > 0:
-                        max_afford = math.floor(agent.cash / effective_price + 1e-9)
+                    if agent_id not in cash_budget:
+                        cash_budget[agent_id] = agent.cash
+                    if sm.price > 0 and cash_budget[agent_id] > 0 and effective_price > 0:
+                        max_afford = math.floor(
+                            cash_budget[agent_id] / effective_price + 1e-9
+                        )
                     else:
                         max_afford = 0
                     quantity = min(quantity, max_afford)
                     if quantity > 0:
-                        buy_orders[sym].append((agent_id, quantity))
+                        # Reserve the estimated cost for this order.
+                        cash_budget[agent_id] -= quantity * effective_price
+                        if is_player:
+                            player_orders.setdefault(sym, []).append(
+                                (agent_id, "buy", quantity)
+                            )
+                        else:
+                            buy_orders[sym].append((agent_id, quantity))
 
                 elif action_type == "sell" and quantity > 0:
                     # Clip quantity to current holdings of this stock.
                     h = agent.holdings.get(sym, 0) if isinstance(agent.holdings, dict) else 0
                     quantity = min(quantity, int(h))
                     if quantity > 0:
-                        sell_orders[sym].append((agent_id, quantity))
+                        if is_player:
+                            player_orders.setdefault(sym, []).append(
+                                (agent_id, "sell", quantity)
+                            )
+                        else:
+                            sell_orders[sym].append((agent_id, quantity))
 
         # ---------- 2. Match orders per stock ----------
         per_stock_totals: Dict[str, dict] = {}
@@ -468,15 +503,29 @@ class MarketEnv:
             total_buy = sum(q for _, q in buys)
             total_sell = sum(q for _, q in sells)
             matched_volume = min(total_buy, total_sell)
-            sm.volume_history.append(matched_volume)
-            per_stock_totals[sym] = {
-                "total_buy": total_buy,
-                "total_sell": total_sell,
-                "matched": matched_volume,
-            }
 
             if matched_volume > 0:
                 self._match_orders(sym, buys, sells, total_buy, total_sell)
+
+            # Market maker fills the human player's orders at the current
+            # price (slippage/fees still apply). Player volume counts
+            # toward price pressure like any other order.
+            player_volume = 0
+            for agent_id, action_type, qty in player_orders.get(sym, []):
+                if qty > 0:
+                    self._execute_trade(sym, agent_id, action_type, qty)
+                    player_volume += qty
+                    if action_type == "buy":
+                        total_buy += qty
+                    else:
+                        total_sell += qty
+
+            sm.volume_history.append(matched_volume + player_volume)
+            per_stock_totals[sym] = {
+                "total_buy": total_buy,
+                "total_sell": total_sell,
+                "matched": matched_volume + player_volume,
+            }
 
         # Update filled quantities from executed trades this step.
         for trade in self.trade_history:
@@ -523,9 +572,10 @@ class MarketEnv:
             mean_reversion = -0.0005 * deviation
             price_change_ratio += mean_reversion
 
-            # Apply event-driven price impact (global, affects all stocks).
+            # Apply event-driven price impact. Global events affect all
+            # stocks; stock-scoped events only move their own stock.
             if self.event_manager:
-                event_effects = self.event_manager.get_combined_effects()
+                event_effects = self.event_manager.get_combined_effects(sym)
                 price_change_ratio += event_effects.get("price_impact", 0.0)
 
             # Add small noise when no shares are matched.
@@ -555,6 +605,8 @@ class MarketEnv:
                     "description": e.description,
                     "type": e.event_type.value,
                     "price_impact": e.price_impact,
+                    "scope": e.scope,
+                    "stock": e.target_stock,
                 }
                 for e in triggered_events
             ]
@@ -710,9 +762,20 @@ class MarketEnv:
         The ``agent_actions`` dict is nested: ``{aid: {sym: {action, ...}}}``.
         """
         per_stock_totals = per_stock_totals or {}
+        # Top-level aggregates across all stocks (CLI pressure bar & web UI).
+        total_buy = sum(
+            per_stock_totals.get(sym, {}).get("total_buy", 0)
+            for sym in self.stocks
+        )
+        total_sell = sum(
+            per_stock_totals.get(sym, {}).get("total_sell", 0)
+            for sym in self.stocks
+        )
         state: Dict[str, Any] = {
             "step": self.step_count,
             "price": self.price,  # backward compat (first stock)
+            "total_buy": total_buy,
+            "total_sell": total_sell,
             "stocks": {
                 sym: {
                     "price": sm.price,
@@ -737,7 +800,8 @@ class MarketEnv:
                 for aid, a in self.agents.items()
             },
             "matched_volume": (
-                self.volume_history[-1] if self.volume_history else 0
+                sum(sm.volume_history[-1] if sm.volume_history else 0
+                    for sm in self.stocks.values())
             ),
             "agent_actions": agent_actions or {},
         }

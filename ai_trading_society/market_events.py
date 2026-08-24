@@ -26,6 +26,21 @@ class EventType(Enum):
     CORPORATE = "corporate"
 
 
+# Event categories that affect the WHOLE market (every stock) rather than a
+# single company. Everything else (earnings, analyst calls, M&A, ...) is
+# company-specific and only hits one stock when triggered.
+GLOBAL_EVENT_TYPES = {
+    EventType.MACRO,
+    EventType.BLACK_SWAN,
+    EventType.CRYPTO,
+}
+
+
+def is_global_event_type(event_type: EventType) -> bool:
+    """Return True when an event category impacts the whole market."""
+    return event_type in GLOBAL_EVENT_TYPES
+
+
 @dataclass
 class MarketEvent:
     """
@@ -49,6 +64,9 @@ class MarketEvent:
         How many steps the event's effects persist.
     probability : float
         Base probability of event occurring (0.0 to 1.0).
+    target_stock : str, optional
+        Stock this event applies to. None means the event is GLOBAL and
+        affects every stock in the market.
     """
     name: str
     description: str
@@ -57,10 +75,22 @@ class MarketEvent:
     sentiment_shift: float = 0.0
     duration_steps: int = 1
     probability: float = 0.01
+    target_stock: Optional[str] = None
 
     def __post_init__(self) -> None:
         self.remaining_steps = 0
         self.triggered_step: Optional[int] = None
+
+    @property
+    def scope(self) -> str:
+        """'global' when the event hits every stock, else 'stock'."""
+        return "global" if self.target_stock is None else "stock"
+
+    def affects_stock(self, symbol: Optional[str]) -> bool:
+        """Whether this event's price/sentiment effects apply to `symbol`."""
+        if self.target_stock is None:
+            return True
+        return symbol is not None and self.target_stock == symbol
 
     def is_active(self) -> bool:
         """Check if event is currently affecting the market."""
@@ -489,6 +519,7 @@ class EventManager:
         templates: Optional[List[MarketEvent]] = None,
         event_probability_multiplier: float = 1.0,
         rng: Optional[Union[random.Random, ModuleType]] = None,
+        stock_names: Optional[List[str]] = None,
     ):
         self.templates = templates or EVENT_TEMPLATES.copy()
         self.multiplier = event_probability_multiplier
@@ -497,8 +528,25 @@ class EventManager:
         self.rng = rng if rng is not None else random
         self.active_events: List[MarketEvent] = []
         self.event_history: List[Dict[str, Any]] = []
+        # Known stock names, used to pick a target stock for stock-scoped
+        # events. Updated by the market environment each step.
+        self.stock_names: List[str] = list(stock_names or [])
 
-    def try_trigger_event(self, step: int) -> List[MarketEvent]:
+    def _resolve_target_stock(self, template: MarketEvent) -> Optional[str]:
+        """Pick the target stock for a newly triggered template event.
+
+        Global categories (macro/black swan/crypto) return None so they hit
+        every stock. Company-specific categories get a random stock.
+        """
+        if is_global_event_type(template.event_type):
+            return None
+        if not self.stock_names:
+            return None
+        return self.rng.choice(self.stock_names)
+
+    def try_trigger_event(
+        self, step: int, stock_names: Optional[List[str]] = None
+    ) -> List[MarketEvent]:
         """
         Attempt to trigger random events this step.
 
@@ -506,11 +554,22 @@ class EventManager:
         in the same step. All triggered events are returned so callers can
         report every one of them.
 
+        Parameters
+        ----------
+        step : int
+            Current simulation step.
+        stock_names : list of str, optional
+            Stocks in the market. Company-specific events are assigned one
+            of these at random; global events ignore it.
+
         Returns
         -------
         events : list of MarketEvent
             All events triggered this step (empty list if none).
         """
+        if stock_names is not None:
+            self.stock_names = list(stock_names)
+
         triggered: List[MarketEvent] = []
 
         for template in self.templates:
@@ -524,6 +583,7 @@ class EventManager:
                     sentiment_shift=template.sentiment_shift,
                     duration_steps=template.duration_steps,
                     probability=template.probability,
+                    target_stock=self._resolve_target_stock(template),
                 )
                 event.trigger(step)
                 self.active_events.append(event)
@@ -533,6 +593,8 @@ class EventManager:
                     "description": event.description,
                     "type": event.event_type.value,
                     "price_impact": event.price_impact,
+                    "scope": event.scope,
+                    "stock": event.target_stock,
                 })
                 triggered.append(event)
         return triggered
@@ -544,8 +606,23 @@ class EventManager:
         custom_desc: Optional[str] = None,
         price_impact: float = 0.05,
         sentiment_shift: float = 0.3,
+        target_stock: Optional[str] = None,
+        stock_names: Optional[List[str]] = None,
     ) -> MarketEvent:
-        """Force trigger a custom or template event (God Mode)."""
+        """Force trigger a custom or template event (God Mode).
+
+        Parameters
+        ----------
+        target_stock : str, optional
+            Explicit stock the event should hit. When omitted, a
+            company-specific template gets a random stock from
+            ``stock_names`` (or the manager's known stock list); global
+            categories stay global.
+        stock_names : list of str, optional
+            Refresh the known stock list before resolving the target.
+        """
+        if stock_names is not None:
+            self.stock_names = list(stock_names)
         # Find template by name if exists
         matched = [t for t in self.templates if t.name == name]
         if matched:
@@ -557,8 +634,15 @@ class EventManager:
                 price_impact=t.price_impact,
                 sentiment_shift=t.sentiment_shift,
                 duration_steps=t.duration_steps,
+                target_stock=(
+                    target_stock
+                    if target_stock is not None
+                    else self._resolve_target_stock(t)
+                ),
             )
         else:
+            # Custom event (not in the template library): global unless the
+            # caller names a target stock.
             event = MarketEvent(
                 name=name,
                 description=custom_desc or name,
@@ -566,6 +650,7 @@ class EventManager:
                 price_impact=price_impact,
                 sentiment_shift=sentiment_shift,
                 duration_steps=2,
+                target_stock=target_stock,
             )
         event.trigger(step)
         self.active_events.append(event)
@@ -575,14 +660,23 @@ class EventManager:
             "description": event.description,
             "type": event.event_type.value,
             "price_impact": event.price_impact,
+            "scope": event.scope,
+            "stock": event.target_stock,
             "forced": True,
         })
         return event
 
 
-    def get_combined_effects(self) -> Dict[str, float]:
+    def get_combined_effects(self, symbol: Optional[str] = None) -> Dict[str, float]:
         """
         Get combined price impact and sentiment shift from all active events.
+
+        Parameters
+        ----------
+        symbol : str, optional
+            Stock being priced. Global events always apply; stock-scoped
+            events only apply when their target matches. None keeps only
+            global events (backward-compatible aggregate view).
 
         Returns
         -------
@@ -593,7 +687,7 @@ class EventManager:
         sentiment_shift = 0.0
 
         for event in self.active_events:
-            if event.is_active():
+            if event.is_active() and event.affects_stock(symbol):
                 # Decay impact over duration
                 decay = event.remaining_steps / event.duration_steps
                 price_impact += event.price_impact * decay * 0.3  # Scale down per-step
@@ -631,23 +725,32 @@ class EventManager:
         Returns
         -------
         events : list of dict
-            Each dict contains name, description, type, remaining_steps,
-            and total_steps for an active event.
+            Each dict contains name, description, type, stock, scope,
+            remaining_steps, and total_steps for an active event.
         """
         return [
             {
                 "name": e.name,
                 "description": e.description,
                 "type": e.event_type.value,
+                "stock": e.target_stock,
+                "scope": e.scope,
                 "remaining_steps": e.remaining_steps,
                 "total_steps": e.duration_steps,
             }
             for e in self.active_events if e.is_active()
         ]
 
-    def get_observation_data(self) -> Dict[str, Any]:
+    def get_observation_data(self, symbol: Optional[str] = None) -> Dict[str, Any]:
         """
         Get event data to include in agent observations.
+
+        Parameters
+        ----------
+        symbol : str, optional
+            Stock the observing agent is being priced against. When given,
+            only events affecting that stock (global + its own) are listed;
+            global-only sentiment is still aggregated market-wide.
 
         Returns
         -------
@@ -655,10 +758,16 @@ class EventManager:
             {"active_events": [...], "market_sentiment": float}
         """
         active = [
-            {"name": e.name, "description": e.description, "type": e.event_type.value}
-            for e in self.active_events if e.is_active()
+            {
+                "name": e.name,
+                "description": e.description,
+                "type": e.event_type.value,
+                "stock": e.target_stock,
+                "price_impact": e.price_impact,
+            }
+            for e in self.active_events
+            if e.is_active() and (symbol is None or e.affects_stock(symbol))
         ]
-
         effects = self.get_combined_effects()
 
         return {

@@ -17,7 +17,7 @@ can mark it as failed and display it accordingly.
 import json
 import math
 import re
-from typing import Any, Dict, Optional, cast
+from typing import Any, Dict, List, Optional, cast
 
 from ..base_agent import BaseAgent
 
@@ -153,6 +153,12 @@ class ExternalAIAgent(BaseAgent):
         # trend detection across the full simulation, not just the 10-step
         # window provided in the observation.
         self._market_history: list[tuple[int, float]] = []
+        # SHORT-TERM memory: one-line summaries of the agent's decisions in
+        # the most recent rounds (capped at memory_window entries).
+        self._short_term_memory: List[str] = []
+        # LONG-TERM memory: significant market events the agent has lived
+        # through (|price impact| >= 5%), kept for the whole run.
+        self._key_events: List[Dict[str, Any]] = []
 
         # Resolve base_url from preset if not explicitly provided.
         self.base_url: Optional[str] = None
@@ -230,64 +236,104 @@ class ExternalAIAgent(BaseAgent):
         ]
         return " ".join(parts)
 
+    def _record_key_events(self, step: int, active_events: List[Dict[str, Any]]) -> None:
+        """
+        Store significant events (|price impact| >= 5%) in long-term memory.
+
+        Deduplicated by event name: a multi-round event is recorded once,
+        when first observed.
+        """
+        if not self.enable_memory:
+            return
+        known = {e["name"] for e in self._key_events}
+        for evt in active_events:
+            try:
+                impact = abs(float(evt.get("price_impact") or 0.0))
+            except (TypeError, ValueError):
+                continue
+            if impact < 0.05:
+                continue
+            name = str(evt.get("name") or "?")
+            if name in known:
+                continue
+            known.add(name)
+            self._key_events.append({
+                "step": step,
+                "name": name,
+                "stock": evt.get("stock"),
+                "impact": evt.get("price_impact", 0.0),
+            })
+        # Keep the most recent 10 key events to bound prompt size.
+        if len(self._key_events) > 10:
+            self._key_events = self._key_events[-10:]
+
+    def _summarize_decisions(self, step: int, result: Dict[str, Any]) -> str:
+        """Compress one round's decision into a single summary line."""
+        parts: List[str] = []
+        decisions = result.get("decisions") if isinstance(result, dict) else None
+        if isinstance(decisions, list):
+            for d in decisions:
+                if not isinstance(d, dict):
+                    continue
+                act = str(d.get("action", "hold")).lower()
+                if act not in ("buy", "sell"):
+                    continue
+                qty = d.get("quantity", 0)
+                sym = d.get("name") or d.get("symbol") or "?"
+                parts.append(f"{act.upper()} {qty} {sym}")
+        elif isinstance(result, dict):
+            act = str(result.get("action", "hold")).lower()
+            if act in ("buy", "sell"):
+                parts.append(f"{act.upper()} {result.get('quantity', 0)}")
+        summary = "; ".join(parts) if parts else "HOLD all positions"
+        return f"Step {step}: {summary}"
+
     def _build_memory_context(self, observation: Dict[str, Any]) -> str:
         """
-        Build the 'memory' section of the prompt: a summary of past
-        decisions and their market outcomes, enabling strategy evolution.
+        Build the 'memory' section of the prompt.
+
+        Combines:
+        - SHORT-TERM memory: the agent's own decisions over the last
+          ``memory_window`` rounds, plus the market outcome since the
+          latest decision.
+        - LONG-TERM memory: key market events (>= 5% impact) the agent has
+          lived through, enabling cross-round learning and adaptation.
         """
-        if not self.enable_memory or not self._conversation_history:
+        if not self.enable_memory:
             return ""
 
-        lines = ["=== YOUR PAST DECISIONS (Memory) ==="]
+        sections: List[str] = []
 
-        # Extract decision history from conversation pairs.
-        recent = self._conversation_history[-(self.memory_window * 2):]
-        decisions = []
-        for i, msg in enumerate(recent):
-            if msg["role"] == "user":
-                # Round labels in the prompt read "Market Data (Step N)".
-                round_match = re.search(r"Step (\d+)", msg["content"])
-                round_num = round_match.group(1) if round_match else "?"
-                # Find the assistant response that follows.
-                if i + 1 < len(recent) and recent[i + 1]["role"] == "assistant":
-                    resp = recent[i + 1]["content"]
-                    # Parse multi-stock decisions format.
-                    # Look for "name"/"symbol" + "action" + "quantity" patterns.
-                    sym_matches = re.findall(
-                        r'"(?:name|symbol)":\s*"([^"]+)".*?"action":\s*"(\w+)".*?"quantity":\s*(\d+)',
-                        resp,
-                    )
-                    if sym_matches:
-                        for sym, act, qty in sym_matches:
-                            if act.lower() != "hold":
-                                decisions.append(
-                                    f"  Step {round_num}: {sym} {act.upper()} {qty}"
-                                )
-                    else:
-                        # Fallback: legacy single-stock format.
-                        action_match = re.search(r'"action":\s*"(\w+)"', resp)
-                        qty_match = re.search(r'"quantity":\s*(\d+)', resp)
-                        if action_match and qty_match:
-                            act_str = action_match.group(1)
-                            if act_str.lower() != "hold":
-                                decisions.append(
-                                    f"  Step {round_num}: {act_str.upper()} {qty_match.group(1)}"
-                                )
+        # --- Short-term: recent decision summaries ---
+        if self._short_term_memory or self._last_action:
+            lines = ["=== YOUR RECENT DECISIONS (Short-Term Memory) ==="]
+            lines.extend(f"  {s}" for s in self._short_term_memory)
+            # Market outcome since the most recent decision.
+            if self._last_action and len(self._market_history) >= 2:
+                prev_price = self._market_history[-2][1]
+                curr_price = self._market_history[-1][1]
+                price_pct = (curr_price - prev_price) / max(prev_price, 0.01) * 100
+                lines.append(
+                    f"  [Market since last action: ${prev_price:.2f} -> "
+                    f"${curr_price:.2f} ({price_pct:+.1f}%)]"
+                )
+            lines.append("=== END SHORT-TERM MEMORY ===")
+            sections.append("\n".join(lines))
 
-        lines.extend(decisions)
+        # --- Long-term: key events lived through ---
+        if self._key_events:
+            lines = ["=== KEY MARKET EVENTS YOU LIVED THROUGH (Long-Term Memory) ==="]
+            for evt in self._key_events:
+                target = evt.get("stock") or "market-wide"
+                impact = evt.get("impact", 0.0)
+                lines.append(
+                    f"  Step {evt.get('step', '?')}: {evt.get('name')} "
+                    f"({target}, {impact * 100:+.0f}%)"
+                )
+            lines.append("=== END LONG-TERM MEMORY ===")
+            sections.append("\n".join(lines))
 
-        # Add market outcome since last action.
-        if self._last_action and len(self._market_history) >= 2:
-            prev_price = self._market_history[-2][1]
-            curr_price = self._market_history[-1][1]
-            price_pct = (curr_price - prev_price) / max(prev_price, 0.01) * 100
-            lines.append(
-                f"  [Market since last action: ${prev_price:.2f} -> "
-                f"${curr_price:.2f} ({price_pct:+.1f}%)]"
-            )
-
-        lines.append("=== END MEMORY ===")
-        return "\n".join(lines)
+        return "\n\n".join(sections)
 
     def _build_prompt(self, observation: Dict[str, Any]) -> str:
         """Convert a market observation into a natural-language prompt."""
@@ -333,8 +379,15 @@ class ExternalAIAgent(BaseAgent):
 
         active_events = observation.get("active_events", [])
         if active_events:
-            event_names = ", ".join(e["name"] for e in active_events)
-            lines.append(f"- Active Events: {event_names}")
+            # Tag each event with its target so the agent knows whether it
+            # hits the whole market or one specific stock.
+            event_strs = []
+            for e in active_events:
+                target = e.get("stock") or "market-wide"
+                event_strs.append(f"{e.get('name', '?')} ({target})")
+            lines.append(f"- Active Events: {', '.join(event_strs)}")
+            # Significant events become long-term memories.
+            self._record_key_events(step, active_events)
 
         # --- Memory context ---
         if self.enable_memory:
@@ -344,7 +397,7 @@ class ExternalAIAgent(BaseAgent):
 
             memory_ctx = self._build_memory_context(observation)
             if memory_ctx:
-                lines.append(f"\n[Your Last Action] {memory_ctx}")
+                lines.append(f"\n{memory_ctx}")
 
         lines.append("\nWhat actions do you take for each stock? Output a decision object for EVERY listed stock in the 'decisions' array.")
         return "\n".join(lines)
@@ -684,15 +737,12 @@ class ExternalAIAgent(BaseAgent):
                 if not isinstance(raw, list):
                     continue
                 parsed_list: List[Dict[str, Any]] = []
-                all_valid = True
                 for d in raw:
                     if not isinstance(d, dict):
-                        all_valid = False
                         break
                     raw_action = d.get("action")
                     if not isinstance(raw_action, str) or not raw_action.strip():
-                        all_valid = False
-                        continue
+                        break
                     quantity = self._coerce_quantity(d.get("quantity", 0))
                     if quantity is None:
                         saw_invalid = True
@@ -711,6 +761,7 @@ class ExternalAIAgent(BaseAgent):
                     })
                 if parsed_list:
                     best_decisions = parsed_list
+                    saw_invalid = False
                 continue
 
             # Legacy single-stock format: {"action": "...", "quantity": ...}
@@ -735,6 +786,42 @@ class ExternalAIAgent(BaseAgent):
 
         if best_decisions is not None:
             return {"decisions": best_decisions}
+        # Salvage pass for TRUNCATED responses (max_tokens cut-off): the
+        # wrapper {"decisions": [...]} cannot be parsed, but the individual
+        # complete decision objects inside can still be recovered.
+        if best_decisions is None and '"decisions"' in response:
+            salvaged: List[Dict[str, Any]] = []
+            seen_items: List[Dict[str, Any]] = []
+            for match in re.finditer(r"\{", response):
+                try:
+                    data, _ = decoder.raw_decode(response[match.start():])
+                except json.JSONDecodeError:
+                    continue
+                if not isinstance(data, dict):
+                    continue
+                raw_action = str(data.get("action", "")).strip().lower()
+                if raw_action not in ("buy", "sell", "hold"):
+                    continue
+                quantity = self._coerce_quantity(data.get("quantity", 0))
+                if quantity is None:
+                    continue
+                stk_name = str(data.get("name") or data.get("symbol") or "").strip()
+                item = {
+                    "name": stk_name,
+                    "symbol": stk_name,
+                    "action": raw_action,
+                    "quantity": quantity,
+                    "reasoning": str(data.get("reasoning", "")).strip(),
+                }
+                if item not in seen_items:
+                    seen_items.append(item)
+                    salvaged.append(item)
+            if salvaged:
+                print(
+                    f"[WARN] Salvaged {len(salvaged)} decision(s) from a "
+                    "truncated AI response (consider raising max_tokens)."
+                )
+                return {"decisions": salvaged}
         if best_legacy is not None:
             return best_legacy
         if saw_invalid:
@@ -781,6 +868,14 @@ class ExternalAIAgent(BaseAgent):
                 self._conversation_history = (
                     self._conversation_history[-cap:]
                 )
+
+            # Short-term memory: keep a compact summary of this round's
+            # decisions so later prompts stay small yet informative.
+            self._short_term_memory.append(
+                self._summarize_decisions(observation.get("step", 0), result)
+            )
+            if len(self._short_term_memory) > self.memory_window:
+                self._short_term_memory = self._short_term_memory[-self.memory_window:]
 
         self._last_action = result
         return result

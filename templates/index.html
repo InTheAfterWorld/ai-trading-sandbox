@@ -169,9 +169,30 @@ input[type="range"]:focus{outline:none;}
 .test-status.ok{color:var(--green);}.test-status.bad{color:var(--red);}
 .config-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px;}.config-actions button{padding:10px 18px;border-radius:8px;font:600 13px inherit;cursor:pointer;}.save-config{background:var(--purple-strong);color:white;border:0;}
 @media(max-width:700px){.trader-row{grid-template-columns:1fr 1fr;}.trader-head{display:none;}.test-api{width:100%;}.remove-trader{justify-self:end;}.test-status{grid-column:1/-1;}}
+
+/* ---------- Light theme ---------- */
+body.light{
+  --bg:#f3f5fa;--bg-secondary:#ffffff;--card:#ffffff;--card-hover:#eef2f8;
+  --border:#d9e0ec;--border-hover:#b7c3da;--text:#18213a;--text-dim:#5c6c8c;
+}
+body.light .glow-orb{opacity:.12;}
+body.light .trader-config{background:rgba(240,244,250,.85);}
+.theme-toggle{
+  position:fixed;top:16px;right:16px;z-index:300;width:40px;height:40px;
+  display:flex;align-items:center;justify-content:center;font-size:18px;
+  background:var(--card);border:1px solid var(--border);border-radius:50%;
+  cursor:pointer;box-shadow:var(--shadow-sm);transition:border-color .15s,transform .15s;
+}
+.theme-toggle:hover{border-color:var(--purple);transform:translateY(-1px);}
 </style>
 </head>
 <body>
+<script>
+/* Apply saved theme before first paint to avoid a dark flash. */
+try{if(localStorage.getItem('ats_theme')==='light')document.body.classList.add('light');}catch(e){}
+</script>
+
+<button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle light / dark mode">🌙</button>
 
 <div class="bg-glow"><div class="glow-orb orb-1"></div><div class="glow-orb orb-2"></div><div class="glow-orb orb-3"></div></div>
 <div class="bg-grid"></div>
@@ -220,6 +241,13 @@ input[type="range"]:focus{outline:none;}
             <div style="font-size:10px;color:var(--text-dim);margin-top:3px;opacity:.7;">Higher = agents herd with friends/idol, fade enemies</div>
           </div>
         </div>
+      </div>
+
+      <div class="field-group">
+        <div class="group-label"><span class="gicon">YOU</span>Your Participation</div>
+        <button class="configure-btn" id="playerJoinBtn" onclick="togglePlayerParticipation()"
+                title="Toggle whether you join the market as a trader or just watch the AI agents trade."></button>
+        <div id="playerJoinHint" style="font-size:10px;color:var(--text-dim);margin-top:8px;text-align:center;"></div>
       </div>
 
       <div class="field-group">
@@ -311,7 +339,33 @@ async function loadConfig(){
     }
     renderSummary(c.traders||[]);
     renderStockSummaryFromConfig();
+    renderPlayerJoin();
   }catch(e){}
+}
+/* ---- Player participation toggle ---- */
+function playerParticipates(){
+  const c=loadStoredConfig();
+  return c.player_participates!==false; // default: join
+}
+function renderPlayerJoin(){
+  const on=playerParticipates();
+  const btn=document.getElementById('playerJoinBtn');
+  if(!btn)return;
+  btn.innerHTML=on
+    ?'✓ <b>Joining as a trader</b> — click to spectate instead'
+    :'👁 <b>Spectating</b> — click to join as a trader';
+  btn.style.borderColor=on?'rgba(34,197,94,.45)':'var(--border)';
+  btn.style.color=on?'var(--green)':'var(--text-dim)';
+  document.getElementById('playerJoinHint').textContent=on
+    ?'You start with the same cash/holdings as the AI agents and can trade from the simulation dashboard.'
+    :'You will watch the AI agents trade without holding a portfolio.';
+}
+function togglePlayerParticipation(){
+  const c=loadStoredConfig();
+  c.player_participates=!playerParticipates();
+  localStorage.setItem('ats_config',JSON.stringify(c));
+  syncToServer();
+  renderPlayerJoin();
 }
 function setVal(id,v){document.getElementById(id).value=v;}
 function getVal(id){return document.getElementById(id).value;}
@@ -456,6 +510,18 @@ function showError(msg){
   const el=document.getElementById('homeError');
   el.textContent=msg;el.style.display='block';
 }
+/* ---- Theme toggle ---- */
+function applyThemeButton(){
+  const btn=document.getElementById('themeToggle');
+  if(!btn)return;
+  btn.textContent=document.body.classList.contains('light')?'☀️':'🌙';
+}
+function toggleTheme(){
+  const light=document.body.classList.toggle('light');
+  try{localStorage.setItem('ats_theme',light?'light':'dark');}catch(e){}
+  applyThemeButton();
+}
+applyThemeButton();
 function start(){
   const c=loadStoredConfig();if(!(c.traders||[]).some(t=>t.api_key)){showError('Configure at least one trader API before launching.');return;}
   saveConfig();
