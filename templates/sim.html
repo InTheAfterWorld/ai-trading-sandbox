@@ -676,7 +676,7 @@ try{if(localStorage.getItem('ats_theme')==='light')document.body.classList.add('
   <span class="spacer"></span>
   <button class="btn" onclick="openGraphPanel()" title="Agent social network (friends / idols / enemies)">🕸 Network</button>
   <button class="btn" id="btnTheme" onclick="toggleTheme()" title="Toggle light / dark mode">🌙</button>
-  <button class="btn" onclick="exportReport()" title="Export a self-contained HTML report (charts, rankings, event timeline, decision logs)">📥 Report</button>
+  <button class="btn" onclick="exportReport()" title="Export a self-contained HTML report">📥 Report</button>
   <button class="btn" onclick="goHome()" title="Back to Home">Home</button>
   <button class="btn" id="btnSettings" onclick="openSettingsPanel()" title="Market Settings">Settings</button>
 </div>
@@ -847,7 +847,7 @@ try{if(localStorage.getItem('ats_theme')==='light')document.body.classList.add('
   <div class="modal-card" style="width:520px;max-width:92vw;">
     <div class="modal-title">🔗 Share This Report</div>
     <div class="modal-body">
-      Copy this read-only snapshot link and share it (anyone on this server can open it):
+      Copy this read-only snapshot link and share it:
       <div style="margin-top:8px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:9px 11px;font-size:11px;word-break:break-all;user-select:all;" id="shareLinkBody"></div>
     </div>
     <div class="modal-actions">
@@ -893,7 +893,6 @@ try{if(localStorage.getItem('ats_theme')==='light')document.body.classList.add('
       <div class="sc-row"><span class="sc-what">Export HTML report</span><kbd>E</kbd></div>
       <div class="sc-row"><span class="sc-what">Show this list</span><kbd>?</kbd></div>
       <div class="sc-row"><span class="sc-what">Close modals / drawers</span><kbd>Esc</kbd></div>
-      <div style="font-size:11px;color:var(--text-dim);margin-top:10px;font-style:italic;">Shortcuts are disabled while typing in an input, or while Ctrl / Alt / Meta is held.</div>
     </div>
     <div class="modal-actions"><button class="btn btn-sm" onclick="closeModal('shortcutsModal')">Close</button></div>
   </div>
@@ -2065,7 +2064,7 @@ function toggleShortcutsModal(force){
 
 const TUT_STEPS=[
   {icon:'📈',title:'Watch the market',text:'The middle panel shows the live candlestick chart, price stats and ⚡ event markers. Hover any candle for details; open 📜 Timeline to replay any past round.'},
-  {icon:'▶',title:'Advance rounds',text:'Press <kbd>Space</kbd> or click <b>Next Round</b> to let every AI agent decide and trade once. <b>Auto</b> plays continuously. Watch the round progress bar at the top.'},
+  {icon:'▶',title:'Advance rounds',text:'Press <kbd>Space</kbd> or click <b>Next Round</b> to enter the next round. <b>Auto</b> plays continuously. Watch the round progress bar at the top.'},
   {icon:'💼',title:'Trade yourself',text:'Use the <b>Your Portfolio</b> card: pick a quantity (25% / 50% / Max shortcuts help), press Buy or Sell. Your order is queued and executes on the next round. Good luck beating the AIs!'},
 ];
 let tutIdx=0;
@@ -2745,7 +2744,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 
   const apiKey=getApiKey();
   if(!apiKey){
-    showToast('No API key found in local configuration. Click Home, then save at least one trader API key in Configure Traders.','error',{sticky:true});
+    showToast('No API key found in local configuration.','error',{sticky:true});
     return;
   }
   loadEventLibrary();

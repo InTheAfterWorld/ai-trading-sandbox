@@ -287,7 +287,7 @@ try{if(localStorage.getItem('ats_theme')==='light')document.body.classList.add('
 
 <div class="trader-config" id="traderConfig">
   <div class="config-dialog">
-    <div class="config-dialog-head"><div><h2>Configure Traders</h2><div class="step-sub" style="margin:5px 0 0;">Each trader can use its own API key, endpoint, and personality.</div></div><button class="close-config" onclick="closeConfig()" aria-label="Close">×</button></div>
+    <div class="config-dialog-head"><div><h2>Configure Traders</h2></div><button class="close-config" onclick="closeConfig()" aria-label="Close">×</button></div>
     <button class="add-trader" onclick="addTrader()">＋ Add trader</button>
     <div id="traderRows"></div>
     <div class="config-actions"><button class="configure-btn" style="width:auto" onclick="closeConfig()">Cancel</button><button class="save-config" onclick="saveTraderConfig()">Save configuration</button></div>
@@ -296,7 +296,7 @@ try{if(localStorage.getItem('ats_theme')==='light')document.body.classList.add('
 
 <div class="trader-config" id="stockConfig">
   <div class="config-dialog">
-    <div class="config-dialog-head"><div><h2>Configure Stocks</h2><div class="step-sub" style="margin:5px 0 0;">Add multiple stocks. Each has its own name, initial price, and per-agent holdings.</div></div><button class="close-config" onclick="closeStockConfig()" aria-label="Close">×</button></div>
+    <div class="config-dialog-head"><div><h2>Configure Stocks</h2></div><button class="close-config" onclick="closeStockConfig()" aria-label="Close">×</button></div>
     <button class="add-trader" onclick="addStock()">＋ Add stock</button>
     <div id="stockRows"></div>
     <div class="config-actions"><button class="configure-btn" style="width:auto" onclick="closeStockConfig()">Cancel</button><button class="save-config" onclick="saveStockConfig()">Save configuration</button></div>
