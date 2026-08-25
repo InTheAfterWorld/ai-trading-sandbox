@@ -402,8 +402,15 @@ function renderTraderRows(traders){
   document.getElementById('traderRows').innerHTML=head+rows;
 }
 function addTrader(){
-  const c=loadStoredConfig();
-  const traders=(c.traders&&c.traders.length)?c.traders:traderDefaults();
+  // Append ONE trader to whatever is currently in the dialog (DOM state),
+  // never re-seed from traderDefaults() — that would spawn 7 rows at once
+  // when the saved list is empty.
+  const rows=[...document.querySelectorAll('#traderRows .trader-row[data-index]')];
+  let traders=rows.length?rows.map(rowData):[];
+  if(traders.length===0){
+    const c=loadStoredConfig();
+    if(Array.isArray(c.traders)&&c.traders.length)traders=c.traders;
+  }
   traders.push({name:`Trade ${traders.length+1}`,provider:'openai',model:'gpt-4o',api_key:'',base_url:'',personality:'balanced'});
   renderTraderRows(traders);
   autoSaveTraders();
@@ -466,18 +473,24 @@ function openStockConfig(){
 }
 function closeStockConfig(){document.getElementById('stockConfig').classList.remove('open');}
 function renderStockRows(stocks){
-  const head=`<div class="trader-row trader-head" style="grid-template-columns:1.5fr 1.2fr 1.2fr auto;"><span>Name</span><span>Price</span><span>Holdings</span><span></span></div>`;
-  const rows=stocks.map((s,i)=>`<div class="trader-row" data-index="${i}" style="grid-template-columns:1.5fr 1.2fr 1.2fr auto;">
+  const head=`<div class="trader-row trader-head" style="grid-template-columns:1.2fr 0.8fr 0.7fr 1fr auto;"><span>Name</span><span>Price</span><span>Holdings</span><span>Sector / Tag</span><span></span></div>`;
+  const rows=stocks.map((s,i)=>`<div class="trader-row" data-index="${i}" style="grid-template-columns:1.2fr 0.8fr 0.7fr 1fr auto;">
     <input data-field="name" value="${esc(s.name||`Stock ${i+1}`)}" placeholder="Stock ${i+1}" oninput="autoSaveStocks()">
     <input data-field="price" type="number" value="${esc(s.price||100)}" min="0.01" step="1" oninput="autoSaveStocks()">
     <input data-field="hold" type="number" value="${esc(s.hold||0)}" min="0" step="1" oninput="autoSaveStocks()">
+    <input data-field="sector" value="${esc(s.sector||'')}" placeholder="e.g. AI chips, Mega Bank" oninput="autoSaveStocks()">
     <button class="remove-trader" onclick="removeStock(this)" title="Remove stock">×</button>
   </div>`).join('');
   document.getElementById('stockRows').innerHTML=head+rows;
 }
 function addStock(){
-  const c=loadStoredConfig();
-  const stocks=(c.stocks&&c.stocks.length)?c.stocks:stockDefaults();
+  // Append ONE stock to the current DOM state (see addTrader for rationale).
+  const rows=[...document.querySelectorAll('#stockRows .trader-row[data-index]')];
+  let stocks=rows.length?rows.map(stockRowData):[];
+  if(stocks.length===0){
+    const c=loadStoredConfig();
+    stocks=(Array.isArray(c.stocks)&&c.stocks.length)?c.stocks:[];
+  }
   stocks.push({name:`Stock ${stocks.length+1}`,price:100,hold:0});
   renderStockRows(stocks);
   autoSaveStocks();

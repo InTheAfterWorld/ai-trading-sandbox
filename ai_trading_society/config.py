@@ -23,6 +23,12 @@ class StockSpec:
     """Default per-agent initial holdings (applied when an agent has no
     explicit holdings for this stock)."""
 
+    sector: str = ""
+    """Optional sector / tag shown to agents (e.g. "AI chips", "Mega Bank")."""
+
+    blurb: str = ""
+    """Optional one-line narrative about the company, fed to agent prompts."""
+
     @property
     def symbol(self) -> str:
         """Backward-compatibility alias returning name."""
@@ -56,6 +62,11 @@ class MarketConfig:
     # --- Observation parameters ---
     price_history_length: int = 20
     """Number of historical prices visible to each agent."""
+
+    history_backfill_steps: int = 30
+    """Synthetic pre-history length: random-walk candles generated before
+    round 1 (ending exactly at each stock's initial price) so agents can
+    analyze trends from the very first step. 0 disables."""
 
     # --- Transaction costs ---
     fee_rate: float = 0.0
@@ -113,6 +124,8 @@ class MarketConfig:
                     "name": s.name,
                     "initial_price": s.initial_price,
                     "initial_holdings": s.initial_holdings,
+                    "sector": s.sector,
+                    "blurb": s.blurb,
                 }
                 for s in self.get_stock_specs()
             ] if self.stocks else None,
@@ -146,5 +159,7 @@ class MarketConfig:
                         initial_holdings=int(
                             s.get("initial_holdings", s.get("hold", 0))
                         ),
+                        sector=str(s.get("sector") or ""),
+                        blurb=str(s.get("blurb") or ""),
                     ))
         return cls(stocks=stocks, **data_copy)

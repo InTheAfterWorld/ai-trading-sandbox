@@ -94,6 +94,8 @@ def _normalize_stocks(stocks: Any) -> list:
             "name": name,
             "price": price,
             "hold": hold,
+            "sector": str(s.get("sector") or "").strip(),
+            "blurb": str(s.get("blurb") or s.get("description") or "").strip(),
         })
     return out
 
@@ -197,6 +199,15 @@ def save_config(data: Dict[str, Any], path: Optional[str] = None) -> Dict[str, A
 
     cfg_path = Path(path) if path else Path(CONFIG_PATH)
     cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    # Keep a one-generation backup of the previous config so an accidental
+    # overwrite (bad script, bad request) is always recoverable.
+    if cfg_path.exists():
+        try:
+            (cfg_path.parent / (cfg_path.name + ".bak")).write_bytes(
+                cfg_path.read_bytes()
+            )
+        except OSError:
+            pass  # best-effort backup only
     with open(cfg_path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2, ensure_ascii=False)
     return cfg

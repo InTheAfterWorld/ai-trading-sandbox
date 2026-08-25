@@ -53,6 +53,11 @@ class StockMarket:
     price: float
     price_history: List[float] = field(default_factory=list)
     volume_history: List[int] = field(default_factory=list)
+    sector: str = ""
+    blurb: str = ""
+    pre_history: List[float] = field(default_factory=list)
+    """Synthetic candles generated before round 1 (observation-only; never
+    part of ``price_history`` so reports/snapshots stay round-accurate)."""
 
     @property
     def symbol(self) -> str:
@@ -118,7 +123,18 @@ class MarketEnv:
                 price=spec.initial_price,
                 price_history=[spec.initial_price],
                 volume_history=[],
+                sector=getattr(spec, "sector", "") or "",
+                blurb=getattr(spec, "blurb", "") or "",
             )
+
+        # --- Synthetic pre-history -------------------------------------
+        # A short random walk per stock ending exactly at its current price,
+        # visible to agents from the first observation so they can analyze
+        # trends before any real rounds happen.
+        backfill = int(getattr(config, "history_backfill_steps", 0) or 0)
+        if backfill > 0:
+            for sm in self.stocks.values():
+                self._backfill_pre_history(sm, backfill)
 
         # Initialize each agent's holdings dict.
         first_name = stock_specs[0].name if stock_specs else "Stock 1"
@@ -189,6 +205,20 @@ class MarketEnv:
         if self.stocks:
             return next(iter(self.stocks.values())).volume_history
         return []
+
+    def _backfill_pre_history(self, sm: "StockMarket", steps: int) -> None:
+        """Generate ``steps`` synthetic prices ending exactly at the stock's
+        current price (a de-drifted random walk, always positive)."""
+        if steps <= 0 or sm.pre_history:
+            return
+        vol = min(0.03, max(0.005, self.config.price_sensitivity * 1.5))
+        walk = [sm.initial_price]
+        for _ in range(steps):
+            walk.append(max(walk[-1] * (1.0 + self.rng.gauss(0.0, vol)), 0.01))
+        # Rescale so the final synthetic point IS the anchor price —
+        # the pre-history then joins round-0 with no gap.
+        scale = sm.initial_price / walk[-1] if walk[-1] > 0 else 1.0
+        sm.pre_history = [round(p * scale, 4) for p in walk]
 
     def set_player_action(self, action: str, quantity: int, symbol: Optional[str] = None):
         """Buffer the human player's action for the current step."""
@@ -296,14 +326,19 @@ class MarketEnv:
         total_holdings_value = 0.0
         for sym, sm in self.stocks.items():
             h = agent.holdings.get(sym, 0) if isinstance(agent.holdings, dict) else 0
-            hist_len = min(len(sm.price_history), self.config.price_history_length)
+            # Observation window: synthetic pre-history first, then real
+            # rounds — agents see a continuous trend from the very start.
+            full_history = list(sm.pre_history) + list(sm.price_history)
+            hist_len = min(len(full_history), self.config.price_history_length)
             stocks_data.append({
                 "symbol": sym,
                 "name": sm.name,
                 "price": sm.price,
-                "price_history": sm.price_history[-hist_len:],
+                "price_history": full_history[-hist_len:],
                 "last_volume": sm.volume_history[-1] if sm.volume_history else 0,
                 "my_holdings": h,
+                "sector": sm.sector,
+                "blurb": sm.blurb,
             })
             total_holdings_value += h * sm.price
 
@@ -371,6 +406,38 @@ class MarketEnv:
             influence = getattr(self.config, "social_influence", 0.0)
         if influence:
             obs["social_influence"] = float(influence)
+
+        # --- Last-round outcome feedback (learning loop) ---
+        # Feedback reflects the most recent step that produced fills, whether
+        # the observation is built mid-round or queried afterwards.
+        prev_trades: list = []
+        if self.trade_history:
+            latest_step = self.trade_history[-1].step
+            prev_trades = [
+                t for t in self.trade_history
+                if t.agent_id == agent_id and t.step == latest_step
+            ]
+        if prev_trades:
+            fills = []
+            net_cash = 0.0
+            for t in prev_trades:
+                sm = self.stocks.get(t.name)
+                move = 0.0
+                if sm is not None and t.price > 0:
+                    move = round((sm.price / t.price - 1) * 100, 2)
+                fills.append({
+                    "action": t.action,
+                    "quantity": t.quantity,
+                    "symbol": t.name,
+                    "fill_price": round(t.price, 2),
+                    "current_price": round(sm.price, 2) if sm else None,
+                    "move_since_fill_pct": move,
+                })
+                net_cash += t.cash_change
+            obs["last_round"] = {
+                "trades": fills,
+                "net_cash_flow": round(net_cash, 2),
+            }
 
         return obs
 

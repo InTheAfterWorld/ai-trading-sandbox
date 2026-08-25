@@ -549,6 +549,46 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
 .rp-fill{display:block;height:100%;width:0%;background:linear-gradient(90deg,var(--purple),var(--blue));border-radius:4px;transition:width .45s ease;}
 .rp-label{font-size:11.5px;font-weight:700;color:var(--text);white-space:nowrap;}
 
+/* ---------- Performance grade badges ---------- */
+.grade-badge{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:20px;height:16px;padding:0 5px;border-radius:8px;
+  font-size:9.5px;font-weight:800;letter-spacing:.3px;
+}
+.grade-S{background:rgba(234,179,8,.18);color:#facc15;border:1px solid rgba(250,204,21,.4);}
+.grade-A{background:rgba(34,197,94,.15);color:var(--green);border:1px solid rgba(34,197,94,.35);}
+.grade-B{background:rgba(96,165,250,.15);color:var(--blue);border:1px solid rgba(96,165,250,.35);}
+.grade-C{background:rgba(249,115,22,.15);color:var(--orange);border:1px solid rgba(249,115,22,.35);}
+.grade-D{background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.35);}
+body.light .grade-S{color:#a16207;}
+
+/* ---------- Feature guide ---------- */
+.guide-modal{width:880px;max-width:94vw;height:82vh;display:flex;flex-direction:column;}
+.guide-layout{display:flex;gap:0;flex:1;min-height:0;}
+.guide-nav{width:200px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;padding:10px 0;}
+.guide-nav button{display:block;width:100%;text-align:left;background:none;border:none;
+  border-left:3px solid transparent;color:var(--text-dim);padding:8px 14px;
+  font-size:12px;font-family:inherit;cursor:pointer;transition:color .1s;}
+.guide-nav button:hover{color:var(--text);}
+.guide-nav button.active{color:var(--purple);border-left-color:var(--purple);background:rgba(167,139,250,.07);}
+.guide-content{flex:1;overflow-y:auto;padding:18px 24px;}
+.guide-section{margin-bottom:26px;}
+.guide-section h3{font-size:13.5px;color:var(--purple);margin-bottom:9px;
+  text-transform:uppercase;letter-spacing:.6px;}
+.guide-section p,.guide-section li{font-size:12.5px;color:var(--text);line-height:1.7;}
+.guide-section ul{padding-left:18px;margin:6px 0;}
+.guide-section li{margin-bottom:5px;}
+.guide-section b{color:var(--text);}
+.guide-tag{display:inline-block;background:var(--bg-secondary);border:1px solid var(--border);
+  border-radius:6px;padding:1px 7px;font-size:11px;color:var(--text-dim);margin:0 2px;}
+body.light .guide-tag{background:#f0f3f9;}
+@media(max-width:700px){
+  .guide-layout{flex-direction:column;}
+  .guide-nav{width:100%;display:flex;overflow-x:auto;border-right:none;
+    border-bottom:1px solid var(--border);padding:0;}
+  .guide-nav button{white-space:nowrap;border-left:none;border-bottom:3px solid transparent;padding:8px 10px;}
+}
+
 /* ---------- Price flash animation ---------- */
 .sp-price.flash-up{animation:flashUp .8s ease;}
 .sp-price.flash-down{animation:flashDown .8s ease;}
@@ -675,6 +715,7 @@ try{if(localStorage.getItem('ats_theme')==='light')document.body.classList.add('
   </span>
   <span class="spacer"></span>
   <button class="btn" onclick="openGraphPanel()" title="Agent social network (friends / idols / enemies)">🕸 Network</button>
+  <button class="btn" id="btnGuide" onclick="openGuide()" title="Feature guide & information">📖 Guide</button>
   <button class="btn" id="btnTheme" onclick="toggleTheme()" title="Toggle light / dark mode">🌙</button>
   <button class="btn" onclick="exportReport()" title="Export a self-contained HTML report">📥 Report</button>
   <button class="btn" onclick="goHome()" title="Back to Home">Home</button>
@@ -910,6 +951,20 @@ try{if(localStorage.getItem('ats_theme')==='light')document.body.classList.add('
   </div>
 </div>
 
+<!-- Modal: feature guide (tutorial + information) -->
+<div class="modal-overlay" id="guideModal">
+  <div class="modal-card guide-modal">
+    <div class="modal-title">📖 Feature Guide</div>
+    <div class="guide-layout">
+      <div class="guide-nav" id="guideNav"></div>
+      <div class="guide-content" id="guideContent"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-sm" onclick="closeModal('guideModal')">Close</button>
+    </div>
+  </div>
+</div>
+
 <!-- Drawer: agent social network graph -->
 <div class="social-overlay" id="graphOverlay" onclick="if(event.target===this)closeGraphPanel()">
   <div class="social-drawer" style="width:540px;">
@@ -1115,12 +1170,14 @@ async function startSim(opts){
   const fee=parseFloat(cfg.fee||0.001);
   const slip=parseFloat(cfg.slip||0.001);
   const socialInfluence=parseFloat(cfg.social_influence||0);
-  // Multi-stock config: [{name, price, hold}, ...] from the homepage.
+  // Multi-stock config: [{name, price, hold, sector, blurb}, ...] from the homepage.
   const stocks=(Array.isArray(cfg.stocks)?cfg.stocks:[])
     .map(s=>({
       name:String(s.name||s.symbol||'').trim(),
       price:s.price!==undefined?s.price:s.initial_price,
       hold:s.hold!==undefined?s.hold:s.initial_holdings,
+      sector:s.sector||'',
+      blurb:s.blurb||s.description||'',
     }))
     .filter(s=>s.name);
 
@@ -1286,10 +1343,13 @@ function renderRankingFromAgents(agents){
     const retCls=ret>=0?'pos':'neg';
     const retStr=ret>=0?'+'+ret.toFixed(2):ret.toFixed(2);
     const you=a.is_player?'<span class="you-badge">you</span>':'';
+    const gb=(a.grade&&!a.is_player)
+      ?`<span class="grade-badge grade-${a.grade}" title="Performance score ${a.score??'-'}/100">${a.grade}</span>`
+      :'';
     return `<div class="rank-row" data-agent="${escapeHtml(a.id)}" onclick="focusAgent(this.dataset.agent)" title="Open this agent's card">
       <span class="rank-num">${i+1}</span>
       <span class="agent-dot" style="background:${sim.agentColors[a.id]||'#888'};color:${sim.agentColors[a.id]||'#888'};"></span>
-      <span class="rank-name">${escapeHtml(a.id)}${you}</span>
+      <span class="rank-name">${escapeHtml(a.id)}${you}</span>${gb}
       <span class="rank-wealth">$${(a.wealth||0).toFixed(0)}</span>
       <span class="rank-ret ${retCls}">${retStr}%</span>
     </div>`;
@@ -1381,10 +1441,14 @@ function agentRowHtml(a,flash){
   }
 
   const youBadge=a.is_player?'<span class="you-badge">you</span>':'';
+  const gradeBadge=(a.grade&&!a.is_player)
+    ?`<span class="grade-badge grade-${a.grade}" title="Performance score ${a.score??'-'}/100">${a.grade}</span>`
+    :'';
   return `<div class="agent-row${expanded?' expanded':''}${flash?' flash':''}" data-agent="${escapeHtml(a.id)}" onclick="toggleAgentRow(this.dataset.agent)">
     <div class="ar-main">
       <span class="agent-dot" style="background:${color};color:${color};"></span>
       <span class="ar-name">${escapeHtml(a.id)}${youBadge}</span>
+      ${gradeBadge}
       <span class="ar-type">${pshort}</span>
       <span class="ar-action ${actionCls}">${action}</span>
       <span class="ar-wealth">$${(a.wealth||0).toFixed(0)}</span>
@@ -2717,7 +2781,124 @@ document.addEventListener('click',(e)=>{
   if(b)b.blur();
 });
 
-/* ---- Theme toggle ---- */
+/* ---- Feature guide (tutorial + information) ---- */
+const GUIDE_SECTIONS=[
+{id:'basics',icon:'🚀',title:'Basics',html:`
+<p>The loop is simple: <b>launch → watch rounds → trade yourself → export a report</b>.</p>
+<ul>
+<li><b>Next Round ▶</b> (<span class="guide-tag">Space</span>): every AI agent observes the market, decides, and trades once.</li>
+<li><b>▶ Auto</b> (<span class="guide-tag">A</span>) plays rounds continuously; the speed selector changes the delay.</li>
+<li>The <b>progress bar</b> in the top bar shows how many rounds remain. Press <b>⏹ End</b> to finish early and see results.</li>
+<li>While agents are thinking, a full-screen overlay blocks clicks — wait for it to clear.</li>
+</ul>`},
+{id:'stocks',icon:'📈',title:'Stocks & History',html:`
+<p>All configured stocks live in the <b>left column</b>; click one to switch the chart.</p>
+<ul>
+<li>Each stock has its own price series, order book and your holdings.</li>
+<li>Every stock starts with a <b>synthetic 30-step pre-history</b> (random walk ending exactly at its current price). It is seeded by the run seed, so identical seeds reproduce identical history.</li>
+<li><b>Candle chart:</b> green = up round, red = down round. Hover a candle for open/close, volume and any events that fired that round.</li>
+<li>Stats under the title show Volume, Volatility, High/Low and Market Cap — hover each for an explanation.</li>
+</ul>`},
+{id:'events',icon:'⚡',title:'Market Events',html:`
+<p>Events are random shocks that move prices and market sentiment.</p>
+<ul>
+<li><b>Global events</b> (blue ⚡) hit <i>every</i> stock — Fed decisions, black swans, crypto crashes…</li>
+<li><b>Stock-specific events</b> (yellow ⚡) hit a single stock — earnings beats, analyst upgrades, scandals…</li>
+<li>On the chart, ⚡ above a candle marks a round where an event fired; hover for details.</li>
+<li><b>📜 Timeline tab</b>: every past event grouped by round. Click a round to open a <b>replay snapshot</b> of that moment (prices, agents, events) with Prev/Next navigation.</li>
+<li>Items in the live feed can be clicked to <b>re-trigger</b> the same event manually.</li>
+<li>Agents receive active events in their prompts — descriptions directly influence their decisions.</li>
+</ul>`},
+{id:'agents',icon:'🤖',title:'Agents & Personalities',html:`
+<p>Each AI trader wraps its LLM brain in a <b>personality preset</b> (aggressive, panicky, conservative…) that bends decisions through traits like panic selling, greed, FOMO and regret avoidance.</p>
+<ul>
+<li>Click an agent row to expand: cash, holdings, wealth, round Δ, per-stock orders and this round's <b>reasoning</b>.</li>
+<li>Trait bars (0-100) show the strength of each bias.</li>
+<li>📋 <b>Timeline</b> opens a log of every decision the agent ever made, with reasoning and outcome.</li>
+<li>💬 Chat (<span class="guide-tag">C</span>) talks to an agent in character via its API.</li>
+</ul>`},
+{id:'grading',icon:'🏆',title:'Agent Grading',html:`
+<p>After every round each agent earns a <b>score 0-100 + grade</b> — shown as a colored badge next to its name and in the leaderboard (hover for the exact score).</p>
+<table style="font-size:12px;width:100%;border-collapse:collapse;">
+<tr style="color:var(--text-dim);text-align:left;"><th style="padding:3px 6px;">Grade</th><th>Score</th><th>Meaning</th></tr>
+<tr><td style="padding:3px 6px;"><span class="grade-badge grade-S">S</span></td><td>85+</td><td>Elite — strong return, low drawdown</td></tr>
+<tr><td style="padding:3px 6px;"><span class="grade-badge grade-A">A</span></td><td>70-84</td><td>Strong, consistent performer</td></tr>
+<tr><td style="padding:3px 6px;"><span class="grade-badge grade-B">B</span></td><td>55-69</td><td>Solid / average</td></tr>
+<tr><td style="padding:3px 6px;"><span class="grade-badge grade-C">C</span></td><td>40-54</td><td>Weak or erratic</td></tr>
+<tr><td style="padding:3px 6px;"><span class="grade-badge grade-D">D</span></td><td>&lt;40</td><td>Losing money badly</td></tr>
+</table>
+<p style="margin-top:8px;">The score blends four ingredients: <b>return (40%)</b>, <b>Sharpe ratio (25%)</b>, <b>max drawdown (20%)</b> and <b>win rate (15%)</b>. A lucky gambler and a steady grinder can therefore earn very different grades on the same profit.</p>`},
+{id:'learning',icon:'🧠',title:'Memory & Feedback',html:`
+<p>Agents are not memoryless — three loops feed their next decision:</p>
+<ul>
+<li><b>Last-round outcome</b>: their prompt lists previous fills (<i>buy 10 X @ $50 → now $51 (+2%)</i>) plus net cash flow, so they see what their own trades did.</li>
+<li><b>Short-term memory</b>: compact summaries of recent decisions stay in context.</li>
+<li><b>Long-term memory</b>: significant events (≥5% impact) are remembered across the whole run.</li>
+</ul>
+<p>Watch for behavior changes after big wins or losses — that is the learning loop at work.</p>`},
+{id:'social',icon:'🕸',title:'Social Network',html:`
+<p>Agents have relationships: an <b>idol</b>, <b>friends</b> and <b>enemies</b>.</p>
+<ul>
+<li>Friends'/idol's trades are <b>mimicked</b>; enemies' trades are <b>faded</b> (traded against) — creating herding and bank-run cascades.</li>
+<li>Strength comes from the <b>Social Influence</b> slider on the homepage (0 = off).</li>
+<li>Expanded agent rows show each relationship; press <span class="guide-tag">N</span> or <b>🕸 Network</b> for the force-directed graph (drag nodes!).</li>
+</ul>`},
+{id:'portfolio',icon:'💼',title:'Your Portfolio',html:`
+<p>The homepage toggle decides whether you <b>join as a trader</b> or <b>spectate</b>. When joined, the 💼 card appears:</p>
+<ul>
+<li>Type a quantity (or use <b>25% / 50% / Max</b> quick-fill based on the selected side), then Buy or Sell.</li>
+<li>Orders are <b>queued</b> and execute on the <b>next round</b> against an implicit market maker — fees & slippage apply, fills are guaranteed.</li>
+<li>You appear in rankings like any other trader. Spectators have no portfolio card and cannot order.</li>
+</ul>`},
+{id:'godmode',icon:'🎛',title:'God Mode & Settings',html:`
+<p>Open <b>Settings</b> in the top bar for live controls:</p>
+<ul>
+<li><b>Event library</b>: force-trigger any of the 41 templates immediately.</li>
+<li><b>Market parameters</b>: price sensitivity (order impact), sentiment drift, event probability multiplier, social influence.</li>
+<li>Changes apply from the next round onward — great for stress-testing agent reactions mid-run.</li>
+</ul>`},
+{id:'reports',icon:'📥',title:'Reports & Sharing',html:`
+<ul>
+<li><b>📥 Report</b> exports a single self-contained HTML file: price charts with ⚡ markers, wealth curves, final rankings with grades, the full event timeline and every agent's decision log.</li>
+<li><b>🔗 Copy Link</b> copies a read-only URL of that report snapshot.</li>
+<li>In the results dialog you can also Restart or start a New Simulation.</li>
+</ul>`},
+{id:'shortcuts',icon:'⌨',title:'Shortcuts',html:`
+<table style="font-size:12.5px;width:100%;border-collapse:collapse;">
+<tr style="color:var(--text-dim);text-align:left;"><th style="padding:3px 6px;">Key</th><th>Action</th></tr>
+<tr><td style="padding:3px 6px;"><span class="guide-tag">Space</span></td><td>Advance one round</td></tr>
+<tr><td style="padding:3px 6px;"><span class="guide-tag">A</span></td><td>Toggle auto-play</td></tr>
+<tr><td style="padding:3px 6px;"><span class="guide-tag">S</span></td><td>End simulation</td></tr>
+<tr><td style="padding:3px 6px;"><span class="guide-tag">C</span></td><td>Open agent chat</td></tr>
+<tr><td style="padding:3px 6px;"><span class="guide-tag">N</span></td><td>Social network graph</td></tr>
+<tr><td style="padding:3px 6px;"><span class="guide-tag">E</span></td><td>Export HTML report</td></tr>
+<tr><td style="padding:3px 6px;"><span class="guide-tag">?</span></td><td>Quick shortcut list</td></tr>
+<tr><td style="padding:3px 6px;"><span class="guide-tag">Esc</span></td><td>Close modals / drawers</td></tr>
+</table>
+<p style="margin-top:6px;color:var(--text-dim);font-size:11.5px;">Shortcuts are ignored while typing, or when Ctrl/Alt/Meta is held.</p>`}
+];
+
+let _guideBuilt=false;
+function buildGuide(){
+  if(_guideBuilt)return;
+  const nav=document.getElementById('guideNav');
+  const content=document.getElementById('guideContent');
+  nav.innerHTML=GUIDE_SECTIONS.map((s,i)=>
+    `<button data-i="${i}" onclick="gotoGuideSection(${i})">${s.icon} ${s.title}</button>`).join('');
+  content.innerHTML=GUIDE_SECTIONS.map((s,i)=>
+    `<div class="guide-section" id="gs-${s.id}"><h3>${s.icon} ${s.title}</h3>${s.html}</div>`).join('');
+  gotoGuideSection(0);
+  _guideBuilt=true;
+}
+function gotoGuideSection(i){
+  document.querySelectorAll('#guideNav button').forEach((b,j)=>b.classList.toggle('active',j===i));
+  const sec=document.getElementById('gs-'+GUIDE_SECTIONS[i].id);
+  if(sec)sec.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function openGuide(){
+  buildGuide();
+  document.getElementById('guideModal').classList.add('show');
+}
 function applyThemeButton(){
   const btn=document.getElementById('btnTheme');
   if(!btn)return;
@@ -2731,8 +2912,29 @@ function toggleTheme(){
 }
 
 /* ---- Init ---- */
-window.addEventListener('DOMContentLoaded',()=>{
+// Sync config from the server (user_config.json is the source of truth shared
+// with the CLI and the homepage). Server values win; local fills gaps where
+// the server has nothing. Keeps /sim consistent after homepage edits or a
+// restored config file.
+async function syncConfigFromServer(){
+  try{
+    const resp=await fetch('/api/config');
+    if(!resp.ok)return;
+    const s=((await resp.json()).config)||{};
+    if(!Object.keys(s).length)return;
+    let local={};
+    try{local=JSON.parse(localStorage.getItem('ats_config')||'{}');}catch(e){}
+    const merged={...local,...s};
+    // Keep locally-entered lists when the server has none saved.
+    if(!(Array.isArray(s.traders)&&s.traders.length))merged.traders=local.traders||[];
+    if(!(Array.isArray(s.stocks)&&s.stocks.length))merged.stocks=local.stocks||[];
+    localStorage.setItem('ats_config',JSON.stringify(merged));
+  }catch(e){/* offline or no server config — keep local */}
+}
+
+window.addEventListener('DOMContentLoaded',async()=>{
   applyThemeButton();
+  await syncConfigFromServer();
   sim.initialPrice=parseFloat(loadConfig().price||100)||100;
   renderStockList();
   updateStockPanel();

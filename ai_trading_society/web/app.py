@@ -40,7 +40,7 @@ from ai_trading_society.console_utils import (
 from ai_trading_society.market_env import MarketEnv
 from ai_trading_society.market_events import EVENT_TEMPLATES
 from ai_trading_society.report_export import generate_report_html, save_report
-from ai_trading_society.simulator import Simulator
+from ai_trading_society.simulator import Simulator, grade_performance, grade_wealth_curve
 
 app = Flask(__name__, template_folder="../../templates", static_folder="../../static")
 # Never fall back to a hard-coded secret: it would let an attacker on the
@@ -320,6 +320,8 @@ def api_start():
                 name=name,
                 initial_price=s_price,
                 initial_holdings=s_hold,
+                sector=str(s.get("sector") or "").strip(),
+                blurb=str(s.get("blurb") or s.get("description") or "").strip(),
             ))
     if not stock_specs:
         stock_specs = [StockSpec(
@@ -528,6 +530,18 @@ def api_step():
         prev_w = state["prev_wealths"].get(aid, wealth)
         delta = wealth - prev_w
 
+        # Performance grade from this agent's wealth curve so far.
+        # NOTE: state["history"] already includes this round's snapshot, so the
+        # curve must NOT be extended with the live wealth again (double count).
+        wealth_curve = [
+            snap.get("agents", {}).get(aid, {}).get("wealth", 0)
+            for snap in state.get("history", [])
+        ]
+        if init_w > 0:
+            g = grade_wealth_curve(wealth_curve or [wealth], init_w)
+        else:
+            g = {"score": 0, "grade": "D"}
+
         agents_data.append({
             "id": aid,
             "type": agent_type_label(agent),
@@ -544,6 +558,8 @@ def api_step():
             "wealth": round(wealth, 2),
             "return_pct": round(ret_pct, 2),
             "delta": round(delta, 2),
+            "score": g["score"],
+            "grade": g["grade"],
         })
 
     # Update prev_wealths.
@@ -681,6 +697,10 @@ def api_results():
             "max_drawdown": round(metrics["max_drawdown"] * 100, 2),
             "volatility": round(metrics["volatility"] * 100, 2),
             "win_rate": round(metrics["win_rate"] * 100, 1),
+            **grade_performance(
+                ret, metrics["sharpe"],
+                metrics["max_drawdown"] * 100, metrics["win_rate"] * 100,
+            ),
         })
 
     buy_trades = [t for t in env.trade_history if t.action == "buy"]
@@ -769,6 +789,11 @@ def api_report_export():
             "max_drawdown": round(metrics["max_drawdown"] * 100, 2),
             "volatility": round(metrics["volatility"] * 100, 2),
             "win_rate": round(metrics["win_rate"] * 100, 1),
+            **grade_performance(
+                (wealth / init_w - 1) * 100 if init_w > 0 else 0.0,
+                metrics["sharpe"],
+                metrics["max_drawdown"] * 100, metrics["win_rate"] * 100,
+            ),
         })
 
     stocks = [

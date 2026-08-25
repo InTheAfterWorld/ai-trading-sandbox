@@ -33,7 +33,7 @@ player = [a for a in d["agents"] if a.get("is_player")][0]
 print("player after 2 rounds:", {k: player[k] for k in ("cash", "wealth", "holdings")})
 assert player["cash"] < 10000, "player buy should have consumed cash"
 
-# 4. History snapshots.
+# 4. History snapshots. 
 r = client.get("/api/history")
 h = r.get_json()
 assert r.status_code == 200 and len(h["history"]) == 2, h

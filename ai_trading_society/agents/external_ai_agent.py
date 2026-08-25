@@ -5,10 +5,6 @@ Supports any OpenAI-compatible API (OpenAI, OpenRouter, ChatAnywhere,
 Groq, Google Gemini via OpenAI-compat endpoint) as well as native
 Anthropic and Google Gemini SDKs.
 
-API keys are never read from environment variables or a `.env` file.
-Every key must be supplied explicitly via `api_key` (the web UI and CLI
-both pass the key the user entered in the homepage configuration).
-
 If no API key is available, or if an API call fails (rate limit, network
 error, bad credentials), the agent raises an exception so the caller
 can mark it as failed and display it accordingly.
@@ -172,6 +168,10 @@ class ExternalAIAgent(BaseAgent):
         # environment variables or a .env file.
         self.api_key = api_key
 
+        # Whether the provider accepted JSON structured-output mode. Toggled
+        # off automatically the first time a provider rejects the parameter.
+        self._json_mode_supported: bool = True
+
     # ------------------------------------------------------------------
     # Prompt construction
     # ------------------------------------------------------------------
@@ -180,24 +180,40 @@ class ExternalAIAgent(BaseAgent):
     def _default_system_prompt() -> str:
         return (
             "You are a professional stock trader managing a portfolio in a simulated market. "
-            "Your goal is to maximize total wealth (cash + sum of all holdings * their prices).\n\n"
+            "Your goal is to maximize total wealth (cash + sum of all holdings * their prices).\n"
+            "\n"
             "Rules:\n"
-            "- You can trade multiple stocks, each identified by its name.\n"
+            "- You can trade multiple stocks, each identified by its exact name as given "
+            "in the market data.\n"
             "- You cannot short sell (holdings >= 0 for each stock).\n"
             "- You cannot borrow money (cash >= 0, shared across all stocks).\n"
-            "- Each step, you MUST decide for EVERY listed stock: BUY, SELL, or HOLD.\n"
-            "- You may trade multiple stocks in one step (e.g. sell one stock to buy another).\n\n"
-            "Response style — CRITICAL:\n"
-            "- Answer like a portfolio manager calling orders with a short rationale.\n"
-            "- 'reasoning' per stock: 1-2 short sentences, under 30 words. "
-            "Give a concise take on the move. No long essays.\n"
-            "- Output ONLY the JSON object. No markdown, no code fences, "
-            "no preamble, no explanations outside the JSON.\n\n"
-            "You remember past decisions; learn from them.\n\n"
-            "Respond in valid JSON only:\n"
-            '{"decisions": [{"name": "<Stock Name>", "action": "buy"|"sell"|"hold", '
-            '"quantity": <int>, "reasoning": "<1-2 short sentences>"}, ...]}\n'
-            "IMPORTANT: Provide a decision object for EVERY listed stock in the market in the 'decisions' array."
+            "- Each step, you MUST decide for EVERY listed stock: buy, sell, or hold.\n"
+            "- You may trade multiple stocks in one step (e.g. sell one stock to buy another).\n"
+            "\n"
+            "OUTPUT FORMAT — THIS IS THE MOST IMPORTANT RULE:\n"
+            "Your ENTIRE response must be ONE raw JSON object, starting with '{' and ending "
+            "with '}'. Nothing else. Specifically:\n"
+            "- NO markdown code fences (no ```json ... ```).\n"
+            "- NO explanation, commentary, or text before or after the JSON.\n"
+            "- NO trailing commas.\n"
+            "- Use double quotes for all keys and string values.\n"
+            "- 'action' must be exactly one of: \"buy\", \"sell\", \"hold\" (lowercase).\n"
+            "- 'quantity' must be an integer (0 for hold).\n"
+            "- 'reasoning': 1-2 short sentences, under 30 words.\n"
+            "- Include one decision object for EVERY stock listed in the market data,\n"
+            "  using each stock's exact name.\n"
+            "\n"
+            "Exact schema:\n"
+            '{"decisions": [{"name": "<stock name>", "action": "buy" | "sell" | "hold", '
+            '"quantity": <integer>, "reasoning": "<1-2 short sentences>"}, ...]}\n'
+            "\n"
+            "Example response for two stocks:\n"
+            '{"decisions": [{"name": "Stock 1", "action": "buy", "quantity": 10, '
+            '"reasoning": "Momentum is strong after the earnings beat."}, '
+            '{"name": "Stock 2", "action": "hold", "quantity": 0, '
+            '"reasoning": "Sideways trend; waiting for a clearer signal."}]}\n'
+            "\n"
+            "You remember past decisions; learn from them."
         )
 
     def _build_market_summary(self) -> str:
@@ -359,10 +375,16 @@ class ExternalAIAgent(BaseAgent):
                 stk_name = s.get("name") or s.get("symbol") or "Stock"
                 hist = s.get("price_history", [])
                 price_str = ", ".join(f"${p:.2f}" for p in hist[-5:])
+                meta = ""
+                if s.get("sector"):
+                    meta += f" | Sector: {s['sector']}"
+                if s.get("blurb"):
+                    meta += f" | About: {s['blurb']}"
                 lines.append(
                     f"  * {stk_name}: "
                     f"${s['price']:.2f} | Holdings: {s.get('my_holdings', 0)} | "
                     f"Recent Prices: [{price_str}] | Volume: {s.get('last_volume', 0)}"
+                    f"{meta}"
                 )
         else:
             # Fallback for legacy single-stock observations.
@@ -389,6 +411,21 @@ class ExternalAIAgent(BaseAgent):
             # Significant events become long-term memories.
             self._record_key_events(step, active_events)
 
+        last_round = observation.get("last_round")
+        if last_round:
+            lines.append("- Last Round Outcome (learn from it):")
+            for f in last_round.get("trades", []):
+                cur = f.get("current_price")
+                if cur is not None:
+                    lines.append(
+                        f"    * {f['action']} {f['quantity']} {f['symbol']} @ "
+                        f"${f['fill_price']:.2f} -> now ${cur:.2f} "
+                        f"({f['move_since_fill_pct']:+.1f}% since your fill)"
+                    )
+            lines.append(
+                f"    Net cash flow: {last_round.get('net_cash_flow', 0):+,.2f}"
+            )
+
         # --- Memory context ---
         if self.enable_memory:
             market_summary = self._build_market_summary()
@@ -399,7 +436,16 @@ class ExternalAIAgent(BaseAgent):
             if memory_ctx:
                 lines.append(f"\n{memory_ctx}")
 
-        lines.append("\nWhat actions do you take for each stock? Output a decision object for EVERY listed stock in the 'decisions' array.")
+        lines.append(
+            "\nWhat actions do you take for each stock? Output a decision object for "
+            "EVERY listed stock in the 'decisions' array."
+        )
+        # Models weight the final tokens heavily — repeat the format contract
+        # right where generation starts.
+        lines.append(
+            "Respond with ONLY the raw JSON object now. Start your reply with '{' "
+            "and end it with '}'. No markdown fences, no commentary."
+        )
         return "\n".join(lines)
 
     # ------------------------------------------------------------------
@@ -512,17 +558,35 @@ class ExternalAIAgent(BaseAgent):
             if self.enable_memory and self._conversation_history:
                 messages.extend(self._conversation_history)
             messages.append({"role": "user", "content": prompt})
+            trading_mode = True
         else:
             # Chat mode: explicit message list with an overridden system prompt.
             system = system_prompt if system_prompt is not None else self.system_prompt
             messages = [{"role": "system", "content": system}] + list(messages)
+            trading_mode = False
 
-        response = client.chat.completions.create(
-            model=self.model,
-            temperature=self.temperature,
-            messages=messages,
-            max_tokens=self.max_tokens,
-        )
+        kwargs: Dict[str, Any] = {
+            "model": self.model,
+            "temperature": self.temperature,
+            "messages": messages,
+            "max_tokens": self.max_tokens,
+        }
+        # Structured-output mode guarantees syntactically valid JSON on
+        # providers that support it. Not all OpenAI-compatible endpoints do,
+        # so fall back to a plain request when the parameter is rejected.
+        # Only used for trading decisions — chat replies stay free-form.
+        use_json_mode = trading_mode and self._json_mode_supported
+        if use_json_mode:
+            kwargs["response_format"] = {"type": "json_object"}
+        try:
+            response = client.chat.completions.create(**kwargs)
+        except Exception:
+            if not use_json_mode:
+                raise
+            # Provider rejected response_format — remember and retry plain.
+            self._json_mode_supported = False
+            kwargs.pop("response_format", None)
+            response = client.chat.completions.create(**kwargs)
 
         # Some providers return a plain string instead of a ChatCompletion object.
         if isinstance(response, str):

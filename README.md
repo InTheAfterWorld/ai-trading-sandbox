@@ -20,13 +20,23 @@ trade multiple stocks while market events fire.
 ## Features
 
 - **LLM traders** — OpenAI, Anthropic, Google Gemini, or any OpenAI-compatible endpoint.
-- **Multiple stocks** — configure any number of stocks, each with its own price and order book.
+  A hardened prompt plus JSON structured-output mode (with automatic fallback)
+  keeps every decision a valid `{"decisions": [...], ...}` object.
+- **Multiple stocks** — configure any number of stocks, each with its own price,
+  order book, **sector tag and company blurb** fed to the agents' prompts.
+- **Synthetic history** — each stock gets a seed-reproducible random-walk
+  pre-history ending exactly at its current price, so agents analyze real trends
+  from the very first round.
 - **Personality traits** — panic, greed, FOMO, stubbornness, loss aversion,
   overconfidence, regret avoidance; individually or as presets.
 - **Human player** — join as a trader or spectate; trade from the web dashboard.
 - **Market events** — 41 templates across 10 categories (global events hit every
   stock; company-specific ones hit one).
 - **Agent memory** — short-term decision summaries plus long-term memory of key events.
+- **Learning feedback** — each agent sees its last round's fills and their
+  price moves since execution, so it can learn from its own outcomes.
+- **Grading** — every agent gets a blended 0-100 score + S/A/B/C/D grade from
+  return, Sharpe, drawdown and win rate (web badges + CLI tags).
 - **Social influence** — idol/friends/enemies relationships drive herding and fading.
 - **God Mode** — inject events and tune market parameters live.
 - **Replay & reports** — per-round snapshots, event timeline replay, agent decision
@@ -66,10 +76,14 @@ Saved to `user_config.json`, shared by the web UI and CLI:
 | Key | Meaning |
 | --- | --- |
 | `traders` | Per-trader provider / model / API key / personality. |
-| `stocks` | `{name, price, hold}` list — multiple stocks supported. |
+| `stocks` | `{name, price, hold, sector?, blurb?}` list — multiple stocks supported. |
 | `cash`, `hold`, `fee`, `slip` | Starting capital and transaction costs. |
 | `social_influence` | Strength of herding behavior (0–1). |
 | `player_participates` | Whether you join the market as a trader (default true). |
+
+In `MarketConfig`, the synthetic pre-history length is `history_backfill_steps`
+(default 30; set 0 to disable). Stock `sector`/`blurb` strings go straight into
+each agent's observation and prompt.
 
 ## Personality Presets
 
@@ -86,9 +100,13 @@ from ai_trading_society import (
 )
 
 config = MarketConfig(
-    stocks=[StockSpec(name="AAPL", initial_price=150.0),
-            StockSpec(name="TSLA", initial_price=250.0)],
-    fee_rate=0.001, slippage_rate=0.001, seed=42,
+    stocks=[
+        StockSpec(name="TechTitan", initial_price=150.0, sector="AI chips",
+                  blurb="High-growth chip designer"),
+        StockSpec(name="MegaBank", initial_price=250.0, sector="Banking",
+                  blurb="Defensive large-cap bank"),
+    ],
+    fee_rate=0.001, slippage_rate=0.001, history_backfill_steps=30, seed=42,
 )
 agents, player = build_agent_roster(provider="openai", model="gpt-4o",
                                     api_key="sk-...", stocks=config.stocks)
@@ -107,8 +125,8 @@ reload one with `load_run_snapshot()`.
 | Symbol | Description |
 | --- | --- |
 | `MarketConfig(...)` | Market parameters: fees, slippage, events, social influence, seed. |
-| `StockSpec(name, initial_price, initial_holdings)` | One stock. |
-| `MarketEnv(config, agents, seed=None)` | Engine: observations, matching, pricing, player buffer. |
+| `StockSpec(name, initial_price, initial_holdings, sector="", blurb="")` | One stock; optional sector tag & company blurb. |
+| `MarketEnv(config, agents, seed=None)` | Engine: observations, matching, pricing, player buffer, last-round feedback. |
 | `Simulator(env)` / `.run(steps, interactive=False)` | Run loop; returns state history. |
 | `.report()` / `.export_csv(filepath)` | Final report / trade CSV. |
 | `build_agent_roster(..., include_player=True)` | Build `(agents, player_agent)`. |
@@ -118,6 +136,9 @@ reload one with `load_run_snapshot()`.
 | `PlayerAgent(agent_id, cash, holdings)` | Human trader (absent when spectating). |
 | `EventManager` / `EVENT_TEMPLATES` | 41 event templates across 10 categories. |
 | `load_run_snapshot(run_id)` | Reload a saved run. |
+| `evaluate_wealth_curve(wealths)` | Sharpe / max-drawdown / volatility / win-rate from a wealth curve. |
+| `grade_performance(ret, sharpe, drawdown, win_rate)` | Blend into a 0-100 score + S/A/B/C/D grade. |
+| `grade_wealth_curve(wealths, initial_wealth)` | Metrics + score + grade in one call. |
 
 ## Project Structure
 
@@ -126,7 +147,7 @@ run.py                    # Web dashboard / CLI entry point
 ai_trading_society/
 ├── market_env.py         # Engine: observations, matching, pricing
 ├── market_events.py      # Event system (41 templates)
-├── simulator.py          # Run loop, reporting, CSV export
+├── simulator.py          # Run loop, reporting, performance grading, CSV export
 ├── web/app.py            # Flask dashboard API
 ├── agents/
 │   ├── external_ai_agent.py   # LLM trader (multi-provider, memory)

@@ -21,6 +21,7 @@ build/
 
 # Shared user configuration (web + CLI)
 user_config.json
+user_config.json.bak
 
 # Output files
 *.csv
@@ -55,5 +56,4 @@ runs/
 
 guichange.md
 GITHUB_SETUP_GUIDE.md
-
 docs/

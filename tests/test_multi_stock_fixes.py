@@ -27,8 +27,10 @@ def test_stock_spec_and_config_without_symbol():
 
     d = config.to_dict()
     assert d["stocks"] == [
-        {"name": "Tesla", "initial_price": 200.0, "initial_holdings": 10},
-        {"name": "Apple", "initial_price": 150.0, "initial_holdings": 15},
+        {"name": "Tesla", "initial_price": 200.0, "initial_holdings": 10,
+         "sector": "", "blurb": ""},
+        {"name": "Apple", "initial_price": 150.0, "initial_holdings": 15,
+         "sector": "", "blurb": ""},
     ]
 
     reconstructed = MarketConfig.from_dict(d)

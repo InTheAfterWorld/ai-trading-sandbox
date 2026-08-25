@@ -6,6 +6,7 @@ when the run completes.
 """
 
 import csv
+import math
 from typing import Any, Dict, List, Optional
 
 from .console_utils import (
@@ -20,6 +21,111 @@ from .console_utils import (
 )
 from .market_env import MarketEnv
 from .run_metadata import RunMetadata, save_run_snapshot
+
+
+# ---------------------------------------------------------------------------
+# Performance evaluation & grading (shared by CLI and web dashboard)
+# ---------------------------------------------------------------------------
+
+def _safe(value: float, default: float = 0.0) -> float:
+    """Coerce a numeric value to a finite float (NaN/Inf -> default)."""
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return default
+    return value if math.isfinite(value) else default
+
+
+def evaluate_wealth_curve(wealths: List[float]) -> Dict[str, float]:
+    """Compute per-step performance metrics from a wealth curve.
+
+    Returns sharpe (annualized), max_drawdown (fraction 0-1),
+    volatility (per-step std dev) and win_rate (0-100).
+    Non-finite wealth entries are replaced with 0 before computing.
+    """
+    default = {"sharpe": 0.0, "max_drawdown": 0.0,
+               "volatility": 0.0, "win_rate": 0.0}
+    # Sanitize: NaN/Infinity would poison every downstream statistic.
+    wealths = [_safe(w) for w in (wealths or [])]
+    if len(wealths) < 2:
+        return default
+
+    returns: List[float] = []
+    for i in range(1, len(wealths)):
+        if wealths[i - 1] > 0:
+            returns.append((wealths[i] - wealths[i - 1]) / wealths[i - 1])
+        else:
+            returns.append(0.0)
+
+    mean_ret = sum(returns) / len(returns)
+    var_ret = sum((r - mean_ret) ** 2 for r in returns) / len(returns)
+    std_ret = var_ret ** 0.5
+    sharpe = (mean_ret / std_ret) * (252 ** 0.5) if std_ret > 0 else 0.0
+
+    peak = wealths[0]
+    max_dd = 0.0
+    for w in wealths:
+        if w > peak:
+            peak = w
+        dd = (peak - w) / peak if peak > 0 else 0.0
+        if dd > max_dd:
+            max_dd = dd
+
+    wins = sum(1 for r in returns if r > 0)
+    win_rate = wins / len(returns) * 100
+
+    return {"sharpe": sharpe, "max_drawdown": max_dd,
+            "volatility": std_ret, "win_rate": win_rate}
+
+
+def grade_performance(
+    return_pct: float,
+    sharpe: float,
+    max_drawdown_pct: float,
+    win_rate_pct: float,
+) -> Dict[str, Any]:
+    """Blend return / risk-adjusted performance into a 0-100 score + grade.
+
+    Weights: return 40 · Sharpe 25 · drawdown 20 · win rate 15.
+    Grades: S >= 85, A >= 70, B >= 55, C >= 40, else D.
+    Non-finite inputs are treated as neutral (0) before scoring.
+    """
+    return_pct = _safe(return_pct)
+    sharpe = _safe(sharpe)
+    max_drawdown_pct = abs(_safe(max_drawdown_pct))
+    win_rate_pct = max(0.0, min(100.0, _safe(win_rate_pct)))
+    ret_pts = max(0.0, min(1.0, (return_pct + 25.0) / 50.0)) * 40
+    sharpe_pts = max(0.0, min(1.0, (sharpe + 2.0) / 4.0)) * 25
+    dd_pts = max(0.0, min(1.0, 1.0 - max_drawdown_pct / 25.0)) * 20
+    win_pts = max(0.0, min(1.0, win_rate_pct / 100.0)) * 15
+    score = round(ret_pts + sharpe_pts + dd_pts + win_pts)
+
+    if score >= 85:
+        grade = "S"
+    elif score >= 70:
+        grade = "A"
+    elif score >= 55:
+        grade = "B"
+    elif score >= 40:
+        grade = "C"
+    else:
+        grade = "D"
+    return {"score": score, "grade": grade}
+
+
+def grade_wealth_curve(wealths: List[float], initial_wealth: float) -> Dict[str, Any]:
+    """Convenience: evaluate a wealth curve and return metrics + score/grade.
+
+    ``wealths`` must include the current (latest) wealth as its last entry.
+    """
+    m = evaluate_wealth_curve(wealths)
+    final = wealths[-1] if wealths else initial_wealth
+    ret_pct = ((final / initial_wealth) - 1) * 100 if initial_wealth > 0 else 0.0
+    result = grade_performance(ret_pct, m["sharpe"], m["max_drawdown"] * 100,
+                               m["win_rate"])
+    result.update(m)
+    result["return_pct"] = round(ret_pct, 2)
+    return result
 
 
 class Simulator:
@@ -628,6 +734,23 @@ class Simulator:
             ret_color = Colors.GREEN if ret_pct >= 0 else Colors.RED
             ret_str = colorize(f"{ret_pct:+.1f}%", ret_color)
 
+            # Performance grade from the agent's wealth curve so far.
+            # state_history already includes the current round's snapshot —
+            # do NOT append `wealth` again (it would double-count the point).
+            curve = [
+                s.get("agents", {}).get(agent_id, {}).get("wealth", 0)
+                for s in self.state_history
+            ]
+            curve = curve if curve else [wealth]
+            g = grade_wealth_curve(curve, initial_w) if initial_w > 0 \
+                else {"score": 0, "grade": "D"}
+            grade_color = {
+                "S": Colors.GREEN, "A": Colors.GREEN, "B": Colors.YELLOW,
+                "C": Colors.ORANGE if hasattr(Colors, "ORANGE") else "",
+                "D": Colors.RED,
+            }.get(g["grade"], "")
+            grade_str = colorize(f"[{g['grade']}·{g['score']}]", grade_color)
+
             # Wealth delta from previous round
             prev_w = self._prev_wealths.get(agent_id)
             if prev_w is not None:
@@ -669,7 +792,7 @@ class Simulator:
             print(
                 f"  {agent_id:<22} {type_str:<18} {action_str} {detail:<28} "
                 f"| ${agent.cash:>9.0f}  H:{holdings_str:<14}  W:${wealth:>9.0f}  "
-                f"R:{ret_str}  d:{delta_str}"
+                f"R:{ret_str}  d:{delta_str}  {grade_str}"
             )
 
             # Display reasoning (truncated for readability)
