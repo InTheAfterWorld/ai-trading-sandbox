@@ -89,6 +89,12 @@ class MarketConfig:
     Friends/idol trades are mimicked, enemies are faded, creating herding
     and bank-run cascades."""
 
+    parallel_agents: bool = True
+    """Collect agent actions concurrently in worker threads each round, so
+    multiple LLM API calls overlap instead of running sequentially. Agent
+    RNG streams are derived per-agent so threaded scheduling cannot change
+    seeded-run trajectories. Set False for strict sequential execution."""
+
     # --- Reproducibility / Random seed ---
     seed: Optional[int] = None
     """Random seed for reproducibility. If None, auto-generated at run start."""
@@ -135,6 +141,7 @@ class MarketConfig:
             "event_probability_multiplier": self.event_probability_multiplier,
             "random_traits": self.random_traits,
             "social_influence": self.social_influence,
+            "parallel_agents": self.parallel_agents,
             "seed": self.seed,
         }
 

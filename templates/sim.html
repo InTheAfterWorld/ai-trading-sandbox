@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -56,7 +56,24 @@ body.dark ::-webkit-scrollbar-thumb:hover{background:#3a5d91;}
   background:#ffffff;
   border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100;
 }
-.logo{font-size:17px;font-weight:700;color:#0a2540;white-space:nowrap;}
+.logo{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:700;color:#1565C0;white-space:nowrap;cursor:pointer;user-select:none;}
+.logo img{width:20px;height:20px;object-fit:contain;display:block;}
+/* ---------- Theme switch (top bar) ---------- */
+.theme-switch{position:relative;display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0;}
+.theme-switch input{position:absolute;opacity:0;width:0;height:0;}
+.theme-switch .ts-slider{
+  width:42px;height:22px;background:var(--border-hover);border-radius:22px;position:relative;
+  transition:background .2s;
+}
+.theme-switch .ts-slider::before{
+  content:'';position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;
+  transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.3);
+}
+.theme-switch input:checked + .ts-slider{background:var(--purple);}
+.theme-switch input:checked + .ts-slider::before{transform:translateX(20px);}
+.theme-switch .ts-sun,.theme-switch .ts-moon{position:absolute;top:50%;transform:translateY(-50%);font-size:10px;pointer-events:none;}
+.theme-switch .ts-sun{left:5px;color:#7c5a00;}
+.theme-switch .ts-moon{right:5px;color:#fff;}
 .top-stat{
   font-size:12px;color:var(--text-dim);background:var(--bg-secondary);
   border:1px solid var(--border);border-radius:8px;padding:6px 12px;display:flex;align-items:center;gap:6px;
@@ -155,7 +172,7 @@ body.dark ::-webkit-scrollbar-thumb:hover{background:#3a5d91;}
 .sp-chart-wrap canvas{position:absolute;inset:0;cursor:crosshair;}
 .candle-tip{
   position:absolute;top:8px;left:8px;display:none;pointer-events:none;z-index:5;
-  background:rgba(22,27,42,.97);border:1px solid var(--border-hover);border-radius:8px;
+  background:var(--card);color:var(--text);border:1px solid var(--border-hover);border-radius:8px;
   padding:7px 10px;font-size:11px;line-height:1.55;box-shadow:var(--shadow-sm);
 }
 .candle-tip b{font-size:10.5px;color:var(--purple);}
@@ -309,11 +326,15 @@ input[type="range"]:focus{outline:none;}
 
 /* ---------- Tables ---------- */
 table{width:100%;border-collapse:collapse;font-size:12px;}
-th{text-align:left;padding:6px 8px;color:var(--text-dim);font-weight:600;border-bottom:1px solid var(--border);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;}
-td{padding:7px 8px;border-bottom:1px solid var(--border);}
+th{text-align:left;padding:7px 10px;color:var(--text-dim);font-weight:600;border-bottom:1px solid var(--border);font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;}
+th.num{text-align:right;}
+th.center{text-align:center;}
+td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:middle;}
 tr:last-child td{border-bottom:none;}
 tr:hover td{background:rgba(99,91,255,.03);}
-td.num{text-align:right;font-variant-numeric:tabular-nums;}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;}
+td.center{text-align:center;white-space:nowrap;}
+td.reason{font-size:11px;color:var(--text-dim);font-style:italic;line-height:1.45;white-space:normal;word-break:break-word;min-width:160px;max-width:320px;}
 
 /* ---------- Utilities ---------- */
 .pos{color:var(--green);}
@@ -326,7 +347,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
 .bottombar{
   position:fixed;bottom:0;left:0;right:0;z-index:100;
   display:flex;align-items:center;gap:12px;padding:10px 24px;
-  background:rgba(13,17,26,.9);
+  background:var(--card);
   border-top:1px solid var(--border);
 }
 .status-chip{
@@ -345,8 +366,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
 }
 .toast{
   pointer-events:auto;display:flex;align-items:flex-start;gap:10px;padding:12px 14px;
-  background:rgba(22,27,42,.97);border:1px solid var(--border);border-radius:12px;
-  box-shadow:var(--shadow-lg);font-size:12.5px;line-height:1.5;
+  background:var(--card);border:1px solid var(--border);border-radius:12px;
+  box-shadow:var(--shadow-lg);font-size:12.5px;line-height:1.5;color:var(--text);
   animation:toastIn .25s ease;
 }
 @keyframes toastIn{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:translateX(0)}}
@@ -378,7 +399,7 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
 .wait-window{
   position:fixed;top:76px;left:50%;transform:translateX(-50%) translateY(-8px);z-index:250;
   display:flex;align-items:center;gap:13px;padding:13px 20px;
-  background:rgba(22,27,42,.96);border:1px solid var(--border-hover);border-radius:12px;
+  background:var(--card);color:var(--text);border:1px solid var(--border-hover);border-radius:12px;
   box-shadow:var(--shadow-lg);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;
 }
 .wait-window.show{opacity:1;transform:translateX(-50%) translateY(0);}
@@ -404,7 +425,8 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
   background-size:200% 100%;animation:shimmer 1.2s linear infinite;
 }
 @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
-.agents-thinking .ar-action{animation:thinkingPulse 1.1s ease-out infinite;}
+.agents-thinking .agent-dot{animation:thinkingPulse 1.1s ease-out infinite;}
+.agents-thinking .ar-name{opacity:.85;}
 @keyframes thinkingPulse{0%,100%{opacity:1}50%{opacity:.35}}
 
 /* ---------- Modal ---------- */
@@ -522,6 +544,23 @@ td.num{text-align:right;font-variant-numeric:tabular-nums;}
   border-left:3px solid var(--purple);
 }
 .ar-reasoning.error{color:var(--red);border-left-color:var(--red);font-style:normal;font-weight:600;}
+.sa-orders{
+  margin:10px 0;padding:9px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px;
+}
+.sa-orders-title{
+  font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--text-dim);margin-bottom:7px;
+}
+.sa-orders-list{display:flex;flex-direction:column;gap:5px;}
+.sa-order{display:flex;align-items:center;gap:8px;font-size:11.5px;line-height:1.4;}
+.sa-order-badge{
+  font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:4px;text-transform:uppercase;flex-shrink:0;width:42px;text-align:center;
+}
+.sa-order-badge.buy{color:var(--green);background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.25);}
+.sa-order-badge.sell{color:var(--red);background:rgba(239,68,68,.12);border:1px solid rgba(239,68,68,.25);}
+.sa-order-badge.hold{color:var(--text-dim);background:var(--bg-secondary);border:1px solid var(--border);}
+.sa-order-stock{font-weight:600;color:var(--text);}
+.sa-order-detail{color:var(--text-dim);font-size:11px;margin-left:auto;}
+.sa-order-unfilled{color:var(--orange);font-size:10.5px;}
 .ar-personality{font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;display:inline-block;}
 .ar-desc{font-size:11px;color:var(--text-dim);line-height:1.5;margin:6px 0;}
 .ar-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:4px 14px;font-size:11px;margin:8px 0;}
@@ -664,6 +703,9 @@ body.dark .guide-tag{background:#f0f3f9;}
   background:var(--bg-secondary);color:var(--text-dim);cursor:pointer;font-family:inherit;transition:all .15s;
 }
 .tab-btn.active{border-color:var(--purple);color:var(--purple);background:rgba(99,91,255,.1);}
+/* Inline network graph container (Events & Activity → Network tab) */
+.graph-inline{position:relative;height:300px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden;}
+.graph-inline canvas{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;}
 .etl-item{
   background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-sm);
   padding:9px 11px;margin-bottom:8px;cursor:pointer;transition:all .15s;
@@ -681,9 +723,15 @@ body.dark .guide-tag{background:#f0f3f9;}
 .etl-jump{font-size:9.5px;color:var(--purple);margin-top:4px;font-weight:700;}
 
 /* ---------- Modals: replay / agent timeline / shortcuts / tutorial ---------- */
-.modal-wide{width:600px;max-width:94vw;max-height:88vh;display:flex;flex-direction:column;}
+.modal-wide{width:760px;max-width:95vw;max-height:88vh;display:flex;flex-direction:column;}
 .modal-scroll{flex:1;overflow-y:auto;font-size:12px;line-height:1.5;color:var(--text-dim);}
 .modal-scroll b{color:var(--text);}
+.tl-summary-bar{
+  display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:9px 12px;
+  background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;
+  margin-bottom:12px;font-size:12px;color:var(--text-dim);
+}
+.tl-summary-bar b{color:var(--text);}
 .replay-head{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px;}
 .replay-cell{background:var(--bg-secondary);border:1px solid var(--border);border-radius:9px;padding:7px 9px;}
 .replay-cell .pf-label{margin-bottom:2px;}
@@ -739,17 +787,18 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
 
 <!-- Top bar -->
 <div class="topbar">
-  <span class="logo">AI Trading Sandbox</span>
+  <span class="logo" onclick="goHome()" title="Back to Home"><img src="{{ url_for('static', filename='logo.png') }}" alt="ATS Logo">AI Trading Sandbox</span>
   <span class="round-progress">
     <span class="rp-bar"><span class="rp-fill" id="rpFill"></span></span>
     <span class="rp-label" id="topRound">Round 0 / 0</span>
   </span>
   <span class="spacer"></span>
-  <button class="btn" onclick="openGraphPanel()" title="Agent social network (friends / idols / enemies)">🕸 Network</button>
+  <label class="theme-switch" title="Toggle light / dark mode">
+    <input type="checkbox" id="themeSwitch" onchange="toggleTheme()">
+    <span class="ts-slider"><span class="ts-sun">☀️</span><span class="ts-moon">🌙</span></span>
+  </label>
   <button class="btn" id="btnGuide" onclick="openGuide()" title="Feature guide & information">📖 Guide</button>
-  <button class="btn" id="btnTheme" onclick="toggleTheme()" title="Toggle light / dark mode">🌙</button>
   <button class="btn" onclick="exportReport()" title="Export a self-contained HTML report">📥 Report</button>
-  <button class="btn" onclick="goHome()" title="Back to Home">Home</button>
   <button class="btn" id="btnSettings" onclick="openSettingsPanel()" title="Market Settings">Settings</button>
 </div>
 
@@ -829,6 +878,7 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
       <div class="tab-row">
         <button class="tab-btn active" id="tabLive" onclick="switchEventTab('live')">Live Feed</button>
         <button class="tab-btn" id="tabTimeline" onclick="switchEventTab('timeline')">📜 Timeline</button>
+        <button class="tab-btn" id="tabNetwork" onclick="switchEventTab('network')">🕸 Network</button>
       </div>
       <div id="tabPaneLive">
         <div id="activeEvents" class="ae-strip"></div>
@@ -836,6 +886,18 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
       </div>
       <div id="tabPaneTimeline" style="display:none;">
         <div class="timeline" id="eventTimeline"><div class="empty-hint">No events yet — they will appear here as rounds advance.</div></div>
+      </div>
+      <div id="tabPaneNetwork" style="display:none;">
+        <div class="graph-inline">
+          <div class="empty-hint" id="networkEmpty">Run the simulation to build the agent social network here.</div>
+          <canvas id="graphCanvas"></canvas>
+        </div>
+        <div class="graph-legend">
+          <span><span class="gl-line friend"></span>friend</span>
+          <span><span class="gl-line idol"></span>idol (admires)</span>
+          <span><span class="gl-line enemy"></span>enemy</span>
+          <span style="margin-left:auto;font-style:italic;">drag nodes to rearrange</span>
+        </div>
       </div>
     </div>
     <div class="card">
@@ -993,26 +1055,6 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
     </div>
     <div class="modal-actions">
       <button class="btn btn-sm" onclick="closeModal('guideModal')">Close</button>
-    </div>
-  </div>
-</div>
-
-<!-- Drawer: agent social network graph -->
-<div class="social-overlay" id="graphOverlay" onclick="if(event.target===this)closeGraphPanel()">
-  <div class="social-drawer" style="width:540px;">
-    <div class="social-head">
-      <span style="font-size:18px;">🕸</span>
-      <span class="s-title">Agent Social Network</span>
-      <button class="s-close" onclick="closeGraphPanel()">✕</button>
-    </div>
-    <div style="flex:1;position:relative;min-height:0;">
-      <canvas id="graphCanvas" style="position:absolute;inset:0;width:100%;height:100%;"></canvas>
-    </div>
-    <div class="graph-legend">
-      <span><span class="gl-line friend"></span>friend</span>
-      <span><span class="gl-line idol"></span>idol (admires)</span>
-      <span><span class="gl-line enemy"></span>enemy</span>
-      <span style="margin-left:auto;font-style:italic;">drag nodes to rearrange</span>
     </div>
   </div>
 </div>
@@ -1278,12 +1320,22 @@ async function startSim(opts){
 }
 
 /* ---- Step ---- */
+function fetchWithTimeout(url,options={},ms=120000){
+  const ctrl=new AbortController();
+  const timer=setTimeout(()=>ctrl.abort(),ms);
+  return fetch(url,{...options,signal:ctrl.signal}).finally(()=>clearTimeout(timer));
+}
+function fetchStep(){
+  // Abort the /api/step request after a hard cap so the "thinking" overlay
+  // can never stay stuck forever if an external AI provider hangs.
+  return fetchWithTimeout('/api/step',{method:'POST'},120000);
+}
 async function runStep(){
   if(!sim.running||sim.busy)return;
   sim.busy=true;
   setThinking(true);
   try{
-    const resp=await fetch('/api/step',{method:'POST'});
+    const resp=await fetchStep();
     const data=await resp.json();
     if(data.error){showError(data.error);return;}
     if(data.done){sim.running=false;disableStepButtons(true);showResults();return;}
@@ -1349,7 +1401,8 @@ async function runStep(){
       total_buy:data.total_buy||0,total_sell:data.total_sell||0,
       events:data.events||[],
       agents:(data.agents||[]).map(a=>({id:a.id,action:a.action,requested:a.requested,filled:a.filled,
-        reasoning:a.reasoning,wealth:a.wealth,delta:a.delta,return_pct:a.return_pct,is_player:a.is_player,cash:a.cash,holdings:a.holdings})),
+        reasoning:a.reasoning,wealth:a.wealth,delta:a.delta,return_pct:a.return_pct,is_player:a.is_player,cash:a.cash,holdings:a.holdings,
+        actions:a.actions||[]})),
     });
 
     // A queued player order (if any) took effect this round.
@@ -1368,7 +1421,13 @@ async function runStep(){
       disableStepButtons(true);
       showResults();
     }
-  }catch(err){showError('Step failed: '+err.message);}
+  }catch(err){
+    if(err&&err.name==='AbortError'){
+      showError('Step timed out after 120s — the AI provider is unresponsive. Check the trader API key / endpoint and try again.');
+    }else{
+      showError('Step failed: '+err.message);
+    }
+  }
   finally{sim.busy=false;setThinking(false);}
 }
 
@@ -1444,12 +1503,20 @@ function renderAgents(agents){
   agents.forEach(a=>{sim.prevActions[a.id]=String(a.action||'—');});
 }
 
+function formatHoldingsDisplay(a){
+  if(!a||!a.holdings)return '0';
+  if(typeof a.holdings==='number')return String(a.holdings);
+  const entries=Object.entries(a.holdings).filter(([_,v])=>v>0);
+  if(!entries.length)return '0 shares';
+  if(entries.length===1)return `${entries[0][1]} ${entries[0][0]}`;
+  const total=entries.reduce((s,[_,v])=>s+v,0);
+  return `${total} (${entries.map(([k,v])=>`${v} ${k}`).join(', ')})`;
+}
+
 function agentRowHtml(a,flash){
   const ret=a.return_pct||0;
   const retCls=ret>=0?'pos':'neg';
   const retStr=ret>=0?'+'+ret.toFixed(2):ret.toFixed(2);
-  const action=String(a.action||'—').toUpperCase();
-  const actionCls=action==='BUY'?'buy':action==='SELL'?'sell':'hold';
   const expanded=sim.expandedAgent===a.id;
   const color=sim.agentColors[a.id]||'#888';
   const social=sim.socialData?sim.socialData[a.id]:null;
@@ -1480,23 +1547,57 @@ function agentRowHtml(a,flash){
     </div>`;
 
     // Per-stock order detail for this round (which stock, how much).
-    const acts=(a.actions||[]).filter(x=>x&&x.symbol);
-    const actsHtml=acts.length>0?`
-      <div class="sa-orders">
-        <div class="sa-orders-title">This round’s orders</div>
-        ${acts.map(o=>{
-          const raw=String(o.action||'hold').toUpperCase();
-          const c=raw==='BUY'?'buy':raw==='SELL'?'sell':'hold';
-          const qty=o.filled||0;
-          const qstr=(raw==='BUY'||raw==='SELL')&&qty>0
-            ?`${raw==='BUY'?'+':'-'}${qty} ${escapeHtml(o.symbol)}`
-            :(raw==='HOLD'?'—':`${qty} ${escapeHtml(o.symbol)}`);
-          const unfilled=(o.requested||0)-(o.filled||0);
-          const note=unfilled>0?` <span class="dim">(partial, ${unfilled} unfilled)</span>`:'';
-          return `<div class="sa-order"><span class="ar-action ${c}">${raw}</span>
-            <span class="sa-order-qty">${qstr}</span>${note}</div>`;
-        }).join('')}
-      </div>`:'';
+    const acts=(a.actions||[]).filter(x=>x&&(x.symbol||x.name));
+    let actsHtml='';
+    if(acts.length>0){
+      const orderRows=acts.map(o=>{
+        const sym=escapeHtml(o.symbol||o.name);
+        const rawAct=String(o.action||'hold').toUpperCase();
+        const actCls=rawAct==='BUY'?'buy':rawAct==='SELL'?'sell':'hold';
+        const req=Math.max(0,parseInt(o.requested,10)||0);
+        const filled=Math.max(0,parseInt(o.filled,10)||0);
+
+        let qtyText='';
+        let statusText='';
+
+        if(rawAct==='HOLD'){
+          qtyText=`<span class="sa-order-stock">${sym}</span>`;
+          statusText=`<span class="sa-order-detail">Hold (no trade)</span>`;
+        }else if(rawAct==='BUY'||rawAct==='SELL'){
+          const sign=rawAct==='BUY'?'+':'-';
+          if(req>0){
+            if(filled===req){
+              qtyText=`<span class="sa-order-stock">${sym}</span> <span>${sign}${filled} shares</span>`;
+              statusText=`<span class="sa-order-detail" style="color:var(--green)">Filled</span>`;
+            }else if(filled>0){
+              qtyText=`<span class="sa-order-stock">${sym}</span> <span>${sign}${filled} shares</span>`;
+              statusText=`<span class="sa-order-detail sa-order-unfilled">(${filled}/${req} filled, ${req-filled} unmatched)</span>`;
+            }else{
+              qtyText=`<span class="sa-order-stock">${sym}</span> <span style="color:var(--text-dim);">${sign}${req} shares req</span>`;
+              statusText=`<span class="sa-order-detail sa-order-unfilled">(0/${req} filled, unmatched)</span>`;
+            }
+          }else{
+            qtyText=`<span class="sa-order-stock">${sym}</span>`;
+            statusText=`<span class="sa-order-detail">0 shares</span>`;
+          }
+        }else{
+          qtyText=`<span class="sa-order-stock">${sym}</span>`;
+          statusText=`<span class="sa-order-detail">—</span>`;
+        }
+
+        return `<div class="sa-order">
+          <span class="sa-order-badge ${actCls}">${rawAct}</span>
+          ${qtyText}
+          ${statusText}
+        </div>`;
+      }).join('');
+
+      actsHtml=`
+        <div class="sa-orders">
+          <div class="sa-orders-title">This Round's Orders</div>
+          <div class="sa-orders-list">${orderRows}</div>
+        </div>`;
+    }
 
     detail=`<div class="ar-detail">
       ${reasoning?`<div class="ar-reasoning${a.error?' error':''}">${escapeHtml(reasoning)}</div>`:''}
@@ -1507,12 +1608,11 @@ function agentRowHtml(a,flash){
       </div>
       ${desc?`<div class="ar-desc">${escapeHtml(desc)}</div>`:''}
       <div class="ar-grid">
-        <span class="k">Cash</span><b>$${(a.cash||0).toFixed(0)}</b>
-        <span class="k">Holdings</span><b>${holdingQty(a).toFixed(1)}</b>
-        <span class="k">Wealth</span><b>$${(a.wealth||0).toFixed(0)}</b>
+        <span class="k">Cash</span><b>$${(a.cash||0).toLocaleString(undefined,{maximumFractionDigits:0})}</b>
+        <span class="k">Holdings</span><b>${formatHoldingsDisplay(a)}</b>
+        <span class="k">Wealth</span><b>$${(a.wealth||0).toLocaleString(undefined,{maximumFractionDigits:0})}</b>
         <span class="k">Return</span><b class="${retCls}">${retStr}%</b>
-        <span class="k">Round Δ</span><b class="${delta>=0?'pos':'neg'}">${delta>=0?'+':''}${delta.toFixed(0)}</b>
-        <span class="k">Last Order</span><b>${a.requested?`${a.requested} req · ${a.filled||0} filled`:'—'}</b>
+        <span class="k">Round Δ</span><b class="${delta>=0?'pos':'neg'}">${delta>=0?'+':''}$${Math.abs(delta).toLocaleString(undefined,{maximumFractionDigits:0})}</b>
       </div>
       ${traitsHtml}
       ${rels}
@@ -1529,7 +1629,6 @@ function agentRowHtml(a,flash){
       <span class="ar-name">${escapeHtml(a.id)}${youBadge}</span>
       ${gradeBadge}
       <span class="ar-type">${pshort}</span>
-      <span class="ar-action ${actionCls}">${action}</span>
       <span class="ar-wealth">$${(a.wealth||0).toFixed(0)}</span>
       <span class="ar-ret ${retCls}">${retStr}%</span>
     </div>
@@ -2079,8 +2178,11 @@ function switchEventTab(tab){
   sim.eventTab=tab;
   document.getElementById('tabLive').classList.toggle('active',tab==='live');
   document.getElementById('tabTimeline').classList.toggle('active',tab==='timeline');
+  document.getElementById('tabNetwork').classList.toggle('active',tab==='network');
   document.getElementById('tabPaneLive').style.display=tab==='live'?'':'none';
   document.getElementById('tabPaneTimeline').style.display=tab==='timeline'?'':'none';
+  document.getElementById('tabPaneNetwork').style.display=tab==='network'?'':'none';
+  if(tab==='network')buildGraph();
 }
 
 function renderEventTimeline(){
@@ -2193,26 +2295,78 @@ function openAgentTimeline(id){
   if(rows.length===0){
     body='<div class="empty-hint">No rounds recorded yet — advance the simulation first.</div>';
   }else{
-    body=`<table><thead><tr><th>Round</th><th>Action</th><th class="num">Qty</th><th class="num">Wealth</th><th class="num">Δ</th><th class="num">Return</th></tr></thead><tbody>`+
+    body=`<table>
+      <thead>
+        <tr>
+          <th class="center" style="width:52px;">Round</th>
+          <th style="min-width:140px;">Orders</th>
+          <th class="num" style="width:80px;">Wealth</th>
+          <th class="num" style="width:70px;">Round Δ</th>
+          <th class="num" style="width:70px;">Return</th>
+          <th style="min-width:180px;">Reasoning</th>
+        </tr>
+      </thead>
+      <tbody>`+
       rows.map(r=>{
-        const act=String(r.action||'hold').toLowerCase();
         const d=r.delta||0;
         const rp=r.return_pct||0;
-        const qty=(act==='buy'||act==='sell')?`${r.filled||0}${r.requested&&r.filled!==r.requested?` <span class="muted">(${r.requested} req)</span>`:''}`:'—';
+        const dStr=`<span class="${d>=0?'pos':'neg'}">${d>=0?'+':''}$${Math.abs(d).toLocaleString(undefined,{maximumFractionDigits:0})}</span>`;
+        const retStr=`<span class="${rp>=0?'pos':'neg'}">${rp>=0?'+':''}${rp.toFixed(2)}%</span>`;
+        const acts=(r.actions||[]).filter(x=>x&&(x.symbol||x.name));
+
+        let ordersHtml='';
+        if(acts.length>0){
+          ordersHtml=acts.map(o=>{
+            const raw=String(o.action||'hold').toUpperCase();
+            const c=raw==='BUY'?'buy':raw==='SELL'?'sell':'hold';
+            const sym=escapeHtml(o.symbol||o.name);
+            const filled=o.filled||0;
+            const req=o.requested||0;
+            let text=sym;
+            if(raw==='BUY'||raw==='SELL'){
+              const sign=raw==='BUY'?'+':'-';
+              text+=` ${sign}${filled}`;
+              if(req&&filled!==req)text+=` <span class="muted">(${req} req)</span>`;
+            }
+            return `<div style="display:flex;align-items:center;gap:6px;margin:2px 0;">
+              <span class="sa-order-badge ${c}">${raw}</span>
+              <span style="font-weight:600;font-size:11.5px;">${text}</span>
+            </div>`;
+          }).join('');
+        }else{
+          const act=String(r.action||'hold').toLowerCase();
+          const raw=act.toUpperCase();
+          const c=act==='buy'?'buy':act==='sell'?'sell':'hold';
+          const qty=(act==='buy'||act==='sell')
+            ?`${r.filled||0}${r.requested&&r.filled!==r.requested?` <span class="muted">(${r.requested} req)</span>`:''}`
+            :'—';
+          ordersHtml=`<div style="display:flex;align-items:center;gap:6px;">
+            <span class="sa-order-badge ${c}">${raw}</span>
+            <span style="font-weight:600;font-size:11.5px;">${qty}</span>
+          </div>`;
+        }
+
+        const reasonText=r.reasoning?escapeHtml(r.reasoning):'—';
+
         return `<tr>
-          <td><b>${r.round}</b></td>
-          <td><span class="ar-action ${act}">${act.toUpperCase()}</span></td>
-          <td class="num">${qty}</td>
-          <td class="num">$${(r.wealth||0).toFixed(0)}</td>
-          <td class="num ${d>=0?'pos':'neg'}">${d>=0?'+':''}${d.toFixed(0)}</td>
-          <td class="num ${rp>=0?'pos':'neg'}">${rp>=0?'+':''}${rp.toFixed(1)}%</td>
+          <td class="center"><b>#${r.round}</b></td>
+          <td>${ordersHtml}</td>
+          <td class="num"><b>$${(r.wealth||0).toLocaleString(undefined,{maximumFractionDigits:0})}</b></td>
+          <td class="num">${dStr}</td>
+          <td class="num">${retStr}</td>
+          <td class="reason">${reasonText}</td>
         </tr>`;
-      }).join('')+'</tbody></table>';
+      }).join('')+`</tbody></table>`;
   }
   document.getElementById('tlTitle').innerHTML=
-    `<span class="agent-dot" style="background:${color};color:${color};"></span> ${escapeHtml(id)} — decision log`;
+    `<span class="agent-dot" style="background:${color};color:${color};"></span> ${escapeHtml(id)} — Decision Log`;
   document.getElementById('tlBody').innerHTML=
-    `<div style="margin-bottom:10px;font-size:12px;">Personality: <b>${escapeHtml(a.personality||'—')}</b> · Wealth <b>$${(a.wealth||0).toFixed(0)}</b> · Return <b class="${ret>=0?'pos':'neg'}">${ret>=0?'+':''}${ret.toFixed(2)}%</b> · ${rows.length} rounds</div>${body}`;
+    `<div class="tl-summary-bar">
+      <span>Personality: <b>${escapeHtml(a.personality||'—')}</b></span>
+      <span>Wealth: <b>$${(a.wealth||0).toLocaleString(undefined,{maximumFractionDigits:0})}</b></span>
+      <span>Return: <b class="${ret>=0?'pos':'neg'}">${ret>=0?'+':''}${ret.toFixed(2)}%</b></span>
+      <span>Total Rounds: <b>${rows.length}</b></span>
+    </div>${body}`;
   document.getElementById('agentTimelineModal').classList.add('show');
 }
 
@@ -2304,20 +2458,17 @@ function showSharePromptModal(url){
    Agent social network — force-directed graph
    ========================================================= */
 let graphAnim=null;
-function openGraphPanel(){
-  document.getElementById('graphOverlay').classList.add('show');
-  buildGraph();
-}
-function closeGraphPanel(){
-  document.getElementById('graphOverlay').classList.remove('show');
-  if(graphAnim){cancelAnimationFrame(graphAnim);graphAnim=null;}
-}
-
 function buildGraph(){
   const canvas=document.getElementById('graphCanvas');
   if(!canvas)return;
   const agents=Object.keys(sim.agents);
-  if(agents.length===0)return;
+  const empty=document.getElementById('networkEmpty');
+  if(agents.length===0){
+    if(empty)empty.style.display='';
+    if(graphAnim){cancelAnimationFrame(graphAnim);graphAnim=null;}
+    return;
+  }
+  if(empty)empty.style.display='none';
 
   const dpr=window.devicePixelRatio||1;
   const sizeCanvas=()=>{
@@ -2850,13 +3001,11 @@ document.addEventListener('keydown',(e)=>{
     document.querySelectorAll('.modal-overlay.show').forEach(m=>m.classList.remove('show'));
     closeChatPanel();
     closeSettingsPanel();
-    closeGraphPanel();
     return;
   }
   if(e.key==='?'){e.preventDefault();toggleShortcutsModal();return;}
   const drawerOpen=document.getElementById('socialOverlay').classList.contains('show')
-    ||document.getElementById('settingsOverlay').classList.contains('show')
-    ||document.getElementById('graphOverlay').classList.contains('show');
+    ||document.getElementById('settingsOverlay').classList.contains('show');
   if(document.querySelector('.modal-overlay.show')||drawerOpen){
     if(e.key==='c'||e.key==='C')openChatPanel(true);
     return;
@@ -2870,8 +3019,8 @@ document.addEventListener('keydown',(e)=>{
 });
 
 function toggleGraphOpen(){
-  const open=document.getElementById('graphOverlay').classList.contains('show');
-  if(open)closeGraphPanel();else openGraphPanel();
+  if(sim.eventTab==='network')switchEventTab('live');
+  else switchEventTab('network');
 }
 
 /* Blur buttons after click so a later Space press does not re-trigger them. */
@@ -2999,10 +3148,8 @@ function openGuide(){
   document.getElementById('guideModal').classList.add('show');
 }
 function applyThemeButton(){
-  const btn=document.getElementById('btnTheme');
-  if(!btn)return;
-  const dark=document.body.classList.contains('dark');
-  btn.textContent=dark?'🌙':'☀️';
+  const sw=document.getElementById('themeSwitch');
+  if(sw)sw.checked=document.body.classList.contains('dark');
 }
 function toggleTheme(){
   const goingDark=!document.body.classList.contains('dark');

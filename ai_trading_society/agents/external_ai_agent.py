@@ -547,6 +547,10 @@ class ExternalAIAgent(BaseAgent):
         client_kwargs = {"api_key": self.api_key}
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
+        # Bound the HTTP request so a slow / unresponsive provider cannot
+        # hang an entire /api/step for the SDK's default 600s. 100s keeps
+        # it inside the frontend's 120s step timeout so the UI recovers.
+        client_kwargs["timeout"] = 100
 
         # client_kwargs is built dynamically for OpenAI-compatible providers,
         # so mypy cannot validate the expanded kwargs here.

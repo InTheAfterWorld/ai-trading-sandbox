@@ -35,6 +35,9 @@ trade multiple stocks while market events fire.
 - **Agent memory** — short-term decision summaries plus long-term memory of key events.
 - **Learning feedback** — each agent sees its last round's fills and their
   price moves since execution, so it can learn from its own outcomes.
+- **Parallel rounds** — every trader's LLM call fires concurrently each round
+  (per-agent deterministic RNG streams keep seeded runs reproducible);
+  `MarketConfig(parallel_agents=False)` restores strict sequential mode.
 - **Grading** — every agent gets a blended 0-100 score + S/A/B/C/D grade from
   return, Sharpe, drawdown and win rate (web badges + CLI tags).
 - **Social influence** — idol/friends/enemies relationships drive herding and fading.
@@ -80,10 +83,12 @@ Saved to `user_config.json`, shared by the web UI and CLI:
 | `cash`, `hold`, `fee`, `slip` | Starting capital and transaction costs. |
 | `social_influence` | Strength of herding behavior (0–1). |
 | `player_participates` | Whether you join the market as a trader (default true). |
+| `parallel_agents` | Concurrent per-round agent actions (default true). |
 
 In `MarketConfig`, the synthetic pre-history length is `history_backfill_steps`
 (default 30; set 0 to disable). Stock `sector`/`blurb` strings go straight into
-each agent's observation and prompt.
+each agent's observation and prompt. Set `parallel_agents=False` to collect
+agent decisions strictly one-by-one.
 
 ## Personality Presets
 

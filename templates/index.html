@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -346,11 +346,11 @@ async function loadConfig(){
       console.warn('Failed to load saved config from server:', err);
     }
 
-    if(c.steps)setVal('homeStepsInput',c.steps);
-    if(c.cash)setVal('homeCashInput',c.cash);
-    if(c.hold)setVal('homeHoldInput',c.hold);
-    if(c.fee)setVal('homeFeeInput',c.fee);
-    if(c.slip)setVal('homeSlipInput',c.slip);
+    if(c.steps!==undefined&&c.steps!==null)setVal('homeStepsInput',c.steps);
+    if(c.cash!==undefined&&c.cash!==null)setVal('homeCashInput',c.cash);
+    if(c.hold!==undefined&&c.hold!==null)setVal('homeHoldInput',c.hold);
+    if(c.fee!==undefined&&c.fee!==null)setVal('homeFeeInput',c.fee);
+    if(c.slip!==undefined&&c.slip!==null)setVal('homeSlipInput',c.slip);
     if(c.social_influence!==undefined){
       setVal('homeSocialInput',c.social_influence);
       document.getElementById('socialInfluenceVal').textContent=Math.round(parseFloat(c.social_influence)*100)+'%';
@@ -387,25 +387,59 @@ function togglePlayerParticipation(){
 }
 function setVal(id,v){document.getElementById(id).value=v;}
 function getVal(id){return document.getElementById(id).value;}
-function syncToServer(){
-  const c=loadStoredConfig();
-  fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(c)})
-    .then(r=>{if(!r.ok)console.warn('Failed to save config to server:',r.status);})
-    .catch(e=>console.warn('Failed to save config to server:',e));
-}
-function autoSaveConfig(){
-  const existing = loadStoredConfig();
-  const c={
-    ...existing,
-    steps:getVal('homeStepsInput'),
-    cash:getVal('homeCashInput'),hold:getVal('homeHoldInput'),fee:getVal('homeFeeInput'),slip:getVal('homeSlipInput'),
-    social_influence:getVal('homeSocialInput'),
+let _syncTimer = null;
+let _syncSeq = 0;
+function syncToServer(immediate = false){
+  const flush = () => {
+    const c = loadStoredConfig();
+    const currentSeq = ++_syncSeq;
+    fetch('/api/config', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(c)
+    })
+    .then(r => {
+      if (currentSeq !== _syncSeq) return;
+      if (!r.ok) console.warn('Failed to save config to server:', r.status);
+    })
+    .catch(e => {
+      if (currentSeq !== _syncSeq) return;
+      console.warn('Failed to save config to server:', e);
+    });
   };
-  localStorage.setItem('ats_config',JSON.stringify(c));
-  syncToServer();
+
+  if (_syncTimer) {
+    clearTimeout(_syncTimer);
+    _syncTimer = null;
+  }
+  if (immediate) {
+    flush();
+  } else {
+    _syncTimer = setTimeout(flush, 300);
+  }
+}
+const numOr = (id, d) => {
+  const v = (getVal(id) || '').trim();
+  if (v === '') return d;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : d;
+};
+function autoSaveConfig(immediate = false){
+  const existing = loadStoredConfig();
+  const c = {
+    ...existing,
+    steps: Math.max(1, Math.floor(numOr('homeStepsInput', 30))),
+    cash: Math.max(0, numOr('homeCashInput', 10000)),
+    hold: Math.max(0, Math.floor(numOr('homeHoldInput', 0))),
+    fee: Math.max(0, numOr('homeFeeInput', 0)),
+    slip: Math.max(0, numOr('homeSlipInput', 0)),
+    social_influence: Math.max(0, Math.min(1, numOr('homeSocialInput', 0))),
+  };
+  localStorage.setItem('ats_config', JSON.stringify(c));
+  syncToServer(immediate);
 }
 function saveConfig(){
-  autoSaveConfig();
+  autoSaveConfig(true);
 }
 function traderDefaults(){return Array.from({length:7},(_,i)=>({name:`Trade ${i+1}`,provider:'openai',model:'gpt-4o',api_key:'',base_url:'',personality:DEFAULT_PERSONALITIES[i]||'balanced'}));}
 const DEFAULT_PERSONALITIES=['aggressive','conservative','panicky','greedy','fomo_driven','stubborn','emotional'];
@@ -502,7 +536,8 @@ function sectorOptions(selected){
 function stockDefaults(){
   const c=loadStoredConfig();
   if(c.stocks&&c.stocks.length)return c.stocks;
-  return [{name:'Stock 1',price:parseFloat(c.price||100)||100,hold:parseInt(c.hold||20,10)||0}];
+  const numOrVal=(v,d)=>{if(v==null||String(v).trim()==='')return d;const n=Number(v);return Number.isFinite(n)?n:d;};
+  return [{name:'Stock 1',price:Math.max(0.01,numOrVal(c.price,100)),hold:Math.max(0,Math.floor(numOrVal(c.hold,20)))}];
 }
 function openStockConfig(){
   renderStockRows(stockDefaults());
@@ -536,8 +571,10 @@ function removeStock(btn){const row=btn.closest('.trader-row');if(row)row.remove
 function stockRowData(row){
   const d={};
   row.querySelectorAll('[data-field]').forEach(x=>d[x.dataset.field]=x.value.trim());
-  d.price=parseFloat(d.price)||100;
-  d.hold=parseInt(d.hold,10)||0;
+  const p = Number(d.price);
+  d.price = (d.price !== '' && Number.isFinite(p)) ? Math.max(0.01, p) : 100;
+  const h = Number(d.hold);
+  d.hold = (d.hold !== '' && Number.isFinite(h)) ? Math.max(0, Math.floor(h)) : 0;
   return d;
 }
 function autoSaveStocks(){

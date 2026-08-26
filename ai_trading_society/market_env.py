@@ -10,8 +10,11 @@ Core responsibilities:
 5. Trigger market events that affect price and sentiment (global).
 """
 
+import logging
 import math
 import random
+import zlib
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from types import ModuleType
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -19,6 +22,8 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from .base_agent import BaseAgent
 from .config import MarketConfig
 from .market_events import EventManager
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -86,9 +91,11 @@ class MarketEnv:
 
     def __init__(self, config: MarketConfig, agents: List[BaseAgent], seed: int | None = None):
         self.config = config
+        self._pool: Optional[ThreadPoolExecutor] = None
         # RNG injected for reproducibility.
         if seed is None and config.seed is not None:
             seed = config.seed
+        self._base_seed: Optional[int] = seed
         self.rng: Union[random.Random, ModuleType] = (
             random.Random(seed) if seed is not None else random
         )
@@ -101,15 +108,28 @@ class MarketEnv:
             seen.add(a.agent_id)
         self.agents: Dict[str, BaseAgent] = {a.agent_id: a for a in agents}
 
-        # Inject RNG into agents
-        for a in agents:
+        # Inject RNG into agents.
+        #
+        # When the environment is seeded, each agent receives its own
+        # deterministic RNG stream derived from (seed, agent_id) instead of
+        # sharing self.rng. Agent act() calls run concurrently in worker
+        # threads (parallel_agents config), so per-agent streams keep seeded
+        # runs reproducible regardless of thread scheduling order. The
+        # environment's own stream keeps driving events / price noise as
+        # before. When unseeded (self.rng = the random module), agents keep
+        # sharing it to preserve legacy external-seeding behavior.
+        for index, a in enumerate(agents):
+            agent_rng = self.rng
+            if isinstance(self.rng, random.Random):
+                digest = zlib.crc32(str(a.agent_id).encode("utf-8"))
+                agent_rng = random.Random((self._base_seed << 32) ^ digest ^ index)
             try:
-                setattr(a, "rng", self.rng)
+                setattr(a, "rng", agent_rng)
             except Exception:
                 pass
             if hasattr(a, "base_agent"):
                 try:
-                    setattr(a.base_agent, "rng", self.rng)
+                    setattr(a.base_agent, "rng", agent_rng)
                 except Exception:
                     pass
 
@@ -173,6 +193,34 @@ class MarketEnv:
 
         # --- God Mode: persistent sentiment drift (-1..1), 0 by default ---
         self._sentiment_drift: float = 0.0
+
+        # --- Reusable thread pool for parallel agent action collection ---
+        self._pool: Optional[ThreadPoolExecutor] = None
+
+    def _get_pool(self) -> ThreadPoolExecutor:
+        """Get or create the thread pool executor for agent action collection."""
+        target_workers = min(len(self.agents), 16)
+        if self._pool is None or getattr(self._pool, "_max_workers", 0) != target_workers:
+            self._shutdown_pool()
+            self._pool = ThreadPoolExecutor(
+                max_workers=target_workers,
+                thread_name_prefix="ats-agent",
+            )
+        return self._pool
+
+    def _shutdown_pool(self) -> None:
+        """Shut down the background thread pool if active."""
+        pool = getattr(self, "_pool", None)
+        if pool is not None:
+            pool.shutdown(wait=False)
+            self._pool = None
+
+    def close(self) -> None:
+        """Release resources; call after simulation finishes."""
+        self._shutdown_pool()
+
+    def __del__(self) -> None:
+        self._shutdown_pool()
 
     # ------------------------------------------------------------------
     # Backward-compat properties (delegate to first stock)
@@ -477,20 +525,53 @@ class MarketEnv:
             aid: {} for aid in self.agents
         }
 
-        for agent_id, agent in self.agents.items():
-            obs = self.get_observation(agent_id)
+        # Generate all observations up front. Observation generation only
+        # READS market state (prices, holdings, previous-round feedback) and
+        # no agent's act() mutates shared market state, so these are exactly
+        # the same observations a sequential loop would build.
+        observations = {aid: self.get_observation(aid) for aid in self.agents}
+
+        def _collect(agent_id: str):
+            """Run one agent's act(); returns (decisions, error_or_None)."""
             try:
-                action = agent.act(obs)
+                action = self.agents[agent_id].act(observations[agent_id])
                 if not isinstance(action, dict):
                     raise ValueError("agent action must be a dictionary")
-                decisions = self._parse_decisions(action, stock_symbols)
+                return self._parse_decisions(action, stock_symbols), None
             except Exception as exc:
+                return None, exc
+
+        # Collect actions concurrently by default: each trader's LLM API call
+        # (typically the slowest part of a round) overlaps with the others,
+        # cutting wall-clock time from sum-of-latencies to max-of-latencies.
+        # Deterministic per-agent RNG streams keep seeded runs reproducible
+        # regardless of completion order; results are gathered back into
+        # agent insertion order before any further processing.
+        use_parallel = bool(getattr(self.config, "parallel_agents", True)) and (
+            len(self.agents) > 1
+        )
+        outcomes: Dict[str, Tuple[Optional[List[Dict[str, Any]]], Optional[Exception]]] = {}
+        if use_parallel:
+            pool = self._get_pool()
+            futures = {aid: pool.submit(_collect, aid) for aid in self.agents}
+            for aid, fut in futures.items():
+                outcomes[aid] = fut.result()
+        else:
+            for aid in self.agents:
+                outcomes[aid] = _collect(aid)
+
+        for agent_id, agent in self.agents.items():
+            decisions, first_exc = outcomes[agent_id]
+            if first_exc is not None:
+                exc = first_exc
                 count = self._agent_error_counts.get(agent_id, 0) + 1
                 self._agent_error_counts[agent_id] = count
                 if count == 1:
-                    print(
-                        f"[WARN] Agent '{agent_id}' failed to act: "
-                        f"{type(exc).__name__}: {exc}. Recording an AI failure."
+                    logger.warning(
+                        "Agent '%s' failed to act: %s: %s. Recording an AI failure.",
+                        agent_id,
+                        type(exc).__name__,
+                        exc,
                     )
                 decisions = [
                     {

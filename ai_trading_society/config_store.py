@@ -11,8 +11,10 @@ variables.
 """
 
 import json
+import math
+import os
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -25,6 +27,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "slip": 0.001,
     "provider": "openai",
     "model": "gpt-4o",
+    "social_influence": 0.0,
+    "player_participates": True,
     "traders": [],
     "stocks": [],
 }
@@ -82,14 +86,10 @@ def _normalize_stocks(stocks: Any) -> list:
         if not name or name in seen_names:
             continue
         seen_names.add(name)
-        try:
-            price = float(s.get("price", s.get("initial_price", 100.0)))
-        except (TypeError, ValueError):
-            price = 100.0
-        try:
-            hold = int(s.get("hold", s.get("initial_holdings", 0)))
-        except (TypeError, ValueError):
-            hold = 0
+        p = _coerce_number(s.get("price", s.get("initial_price", 100.0)))
+        price = max(0.01, min(p, 1_000_000.0)) if p is not None else 100.0
+        h = _coerce_number(s.get("hold", s.get("initial_holdings", 0)))
+        hold = int(max(0, min(h, 1_000_000))) if h is not None else 0
         out.append({
             "name": name,
             "price": price,
@@ -100,29 +100,65 @@ def _normalize_stocks(stocks: Any) -> list:
     return out
 
 
-_INT_KEYS = ("steps", "hold")
-_FLOAT_KEYS = ("price", "cash", "fee", "slip")
+_RANGES: Dict[str, Tuple[float, float]] = {
+    "steps": (1, 10_000),
+    "hold": (0, 1_000_000),
+    "price": (0.01, 1_000_000),
+    "cash": (0.0, 1e12),
+    "fee": (0.0, 0.5),
+    "slip": (0.0, 0.5),
+    "social_influence": (0.0, 1.0),
+}
 _STR_KEYS = ("provider", "model")
+_BOOL_KEYS = ("player_participates",)
+
+
+def _coerce_number(val: Any) -> Optional[float]:
+    """Return a finite float from a JSON number or numeric string, else ``None``.
+
+    Homepage inputs arrive as JSON numbers or numeric strings (DOM input
+    values are always text); both are accepted. Booleans, lists, and
+    non-numeric junk are rejected so callers can fall back to defaults.
+    Non-finite values (``nan``/``inf``/``infinity``, accepted by ``float()``
+    and by bare JSON literals) are also rejected: they would either crash
+    the later ``int()`` conversion in :func:`save_config` or poison market
+    math if they ever reached a config consumer.
+    """
+    if isinstance(val, bool):
+        return None
+    if isinstance(val, (int, float)):
+        num = float(val)
+    elif isinstance(val, str):
+        try:
+            num = float(val.strip())
+        except ValueError:
+            return None
+    else:
+        return None
+    return num if math.isfinite(num) else None
 
 
 def _apply_scalar_fields(cfg: Dict[str, Any], data: Dict[str, Any]) -> None:
-    """Copy scalar config fields into ``cfg``, type-checking numeric values.
+    """Copy scalar config fields into ``cfg``, type-checking and clamping numeric values.
 
-    Numeric fields keep their default whenever the stored value is not a real
-    number (e.g. a hand-edited ``"steps": "abc"``), so the CLI cannot crash on
-    ``range("abc")``. Bool is rejected too, matching the web API's behavior.
+    Numeric fields keep their default whenever the stored value is not
+    interpretable as a number (e.g. a hand-edited ``"steps": "abc"``), so the
+    CLI cannot crash on ``range("abc")``. Valid numeric inputs are coerced and
+    clamped to safe ranges.
     """
     for key in _STR_KEYS:
+        if key in data and data[key] is not None:
+            cfg[key] = str(data[key])
+    for key, (lo, hi) in _RANGES.items():
         if key in data:
-            cfg[key] = data[key]
-    for key in _INT_KEYS:
+            num = _coerce_number(data.get(key))
+            if num is not None:
+                kind = int if key in ("steps", "hold") else float
+                cfg[key] = kind(max(lo, min(num, hi)))
+    for key in _BOOL_KEYS:
         val = data.get(key)
-        if isinstance(val, (int, float)) and not isinstance(val, bool):
-            cfg[key] = int(val)
-    for key in _FLOAT_KEYS:
-        val = data.get(key)
-        if isinstance(val, (int, float)) and not isinstance(val, bool):
-            cfg[key] = float(val)
+        if isinstance(val, bool):
+            cfg[key] = val
 
 
 def _migrate_legacy_stocks(cfg: Dict[str, Any], data: Dict[str, Any]) -> None:
@@ -208,6 +244,16 @@ def save_config(data: Dict[str, Any], path: Optional[str] = None) -> Dict[str, A
             )
         except OSError:
             pass  # best-effort backup only
-    with open(cfg_path, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+    tmp_file = cfg_path.parent / f".{cfg_path.name}.{os.getpid()}.tmp"
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+        os.replace(tmp_file, cfg_path)
+    finally:
+        if tmp_file.exists():
+            try:
+                tmp_file.unlink()
+            except OSError:
+                pass
     return cfg

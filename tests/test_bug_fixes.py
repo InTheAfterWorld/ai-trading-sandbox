@@ -112,6 +112,8 @@ class TestBug4MetadataSnapshot:
 # ---------------------------------------------------------------------------
 class TestBug5ConfigTypeValidation:
     def test_load_config_ignores_bad_numeric_types(self, tmp_path):
+        """Genuinely non-numeric junk falls back to defaults; numeric strings
+        (what homepage inputs send) are coerced into numbers."""
         path = tmp_path / "user_config.json"
         path.write_text(
             '{"steps": "abc", "price": [1,2], "hold": true, "fee": "0.1", "slip": null}',
@@ -121,7 +123,7 @@ class TestBug5ConfigTypeValidation:
         assert cfg["steps"] == 30
         assert cfg["price"] == 100.0
         assert cfg["hold"] == 20
-        assert cfg["fee"] == 0.001
+        assert cfg["fee"] == 0.1
         assert cfg["slip"] == 0.001
 
     def test_save_config_keeps_defaults_for_bad_types(self, tmp_path):

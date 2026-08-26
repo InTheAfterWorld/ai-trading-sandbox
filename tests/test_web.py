@@ -78,6 +78,26 @@ def test_api_config_post_and_get(client, tmp_config_path):
     assert data["traders"][0]["provider"] == "groq"
 
 
+def test_api_config_persists_homepage_adjustments(client, tmp_config_path):
+    """The homepage sends every adjustment through POST /api/config; the two
+    fields that were historically dropped (social-influence slider and the
+    player-participation toggle) must round-trip through user_config.json."""
+    post_res = client.post(
+        "/api/config",
+        json={"social_influence": "0.4", "player_participates": False},
+    )
+    assert post_res.status_code == 200
+    saved = post_res.get_json()["config"]
+    assert saved["social_influence"] == 0.4
+    assert saved["player_participates"] is False
+
+    # A fresh GET (as a new browser session would do) returns them too.
+    get_res = client.get("/api/config")
+    data = get_res.get_json()["config"]
+    assert data["social_influence"] == 0.4
+    assert data["player_participates"] is False
+
+
 def test_api_env_keys_removed(client):
     res = client.get("/api/env_keys")
     assert res.status_code == 404

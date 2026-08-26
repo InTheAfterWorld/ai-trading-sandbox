@@ -80,6 +80,12 @@ class BaseAgent(ABC):
 
             Legacy single-stock format (backward compat, applied to first stock):
             ``{"action": "buy"|"sell"|"hold", "quantity": int}``
+
+        Notes
+        -----
+        Concurrency contract: ``act()`` must be thread-safe and must NOT read or
+        mutate the internal state of other agents or the environment. MarketEnv
+        guarantees only observation snapshot consistency during parallel collection.
         """
         ...
 
