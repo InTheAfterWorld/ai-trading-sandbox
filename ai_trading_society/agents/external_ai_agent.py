@@ -915,8 +915,6 @@ class ExternalAIAgent(BaseAgent):
         if best_decisions is not None:
             return {"decisions": best_decisions}
 
-        if best_decisions is not None:
-            return {"decisions": best_decisions}
         # Salvage pass for TRUNCATED responses (max_tokens cut-off): the
         # wrapper {"decisions": [...]} cannot be parsed, but the individual
         # complete decision objects inside can still be recovered.

@@ -1479,8 +1479,28 @@ function agentRowHtml(a,flash){
       <div class="sa-rel"><span class="rel-label">Enemies</span>${enemies.length>0?enemies.map(x=>relTag(x,'enemy')).join(''):relTag('None','none')}</div>
     </div>`;
 
+    // Per-stock order detail for this round (which stock, how much).
+    const acts=(a.actions||[]).filter(x=>x&&x.symbol);
+    const actsHtml=acts.length>0?`
+      <div class="sa-orders">
+        <div class="sa-orders-title">This round’s orders</div>
+        ${acts.map(o=>{
+          const raw=String(o.action||'hold').toUpperCase();
+          const c=raw==='BUY'?'buy':raw==='SELL'?'sell':'hold';
+          const qty=o.filled||0;
+          const qstr=(raw==='BUY'||raw==='SELL')&&qty>0
+            ?`${raw==='BUY'?'+':'-'}${qty} ${escapeHtml(o.symbol)}`
+            :(raw==='HOLD'?'—':`${qty} ${escapeHtml(o.symbol)}`);
+          const unfilled=(o.requested||0)-(o.filled||0);
+          const note=unfilled>0?` <span class="dim">(partial, ${unfilled} unfilled)</span>`:'';
+          return `<div class="sa-order"><span class="ar-action ${c}">${raw}</span>
+            <span class="sa-order-qty">${qstr}</span>${note}</div>`;
+        }).join('')}
+      </div>`:'';
+
     detail=`<div class="ar-detail">
       ${reasoning?`<div class="ar-reasoning${a.error?' error':''}">${escapeHtml(reasoning)}</div>`:''}
+      ${actsHtml}
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span class="ar-personality" style="background:${pc.bg};color:${pc.color};">${personality}</span>
         <button class="pf-chip" onclick="event.stopPropagation();openAgentTimeline('${escapeHtml(a.id).replace(/'/g,'&#39;')}')" title="Every decision this agent made, round by round">📋 Timeline</button>
