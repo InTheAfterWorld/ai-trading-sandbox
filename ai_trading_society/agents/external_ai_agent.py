@@ -760,35 +760,68 @@ class ExternalAIAgent(BaseAgent):
             return None
         return None
 
-    def _parse_response(self, response: str) -> Dict[str, Any]:
+    @staticmethod
+    def _repair_json_candidates(response: str) -> List[str]:
         """
-        Extract a JSON action object from the AI response.
+        Produce progressively repaired variants of a malformed JSON response.
 
-        Supports both multi-stock and legacy single-stock formats:
-        - Multi-stock: ``{"decisions": [{"symbol", "action", "quantity",
-          "reasoning"}, ...]}``
-        - Legacy single-stock: ``{"action", "quantity", "reasoning"}``
-
-        Handles pure JSON, markdown code blocks, and JSON embedded in text.
-        When several valid objects appear, the LAST one wins.
-
-        For multi-stock format, all valid decision entries are collected.
-        For legacy format, a single action object is returned.
+        Covers the most common LLM formatting mistakes:
+        1. Markdown code fences (```json ... ```)
+        2. Trailing commas before } or ]
+        3. Python-style literals (True / False / None)
+        4. Single-quoted strings instead of double quotes (last resort —
+           may mangle apostrophes inside reasoning text)
         """
-        if not isinstance(response, str) or not response.strip():
-            raise ValueError("AI response was empty or not text")
+        variants: List[str] = []
+        current = response
 
+        stripped = re.sub(r"```[a-zA-Z]*", "", current)
+        if stripped != current:
+            variants.append(stripped)
+            current = stripped
+
+        no_trailing = re.sub(r",\s*(?=[}\]])", "", current)
+        if no_trailing != current:
+            variants.append(no_trailing)
+            current = no_trailing
+
+        py_fixed = re.sub(
+            r"\bNone\b", "null",
+            re.sub(r"\bFalse\b", "false",
+                   re.sub(r"\bTrue\b", "true", current)),
+        )
+        if py_fixed != current:
+            variants.append(py_fixed)
+            current = py_fixed
+
+        squoted = re.sub(
+            r"'([^'\n]*)'",
+            lambda m: '"' + m.group(1).replace('"', '\\"') + '"',
+            current,
+        )
+        if squoted != current:
+            variants.append(squoted)
+        return variants
+
+    def _scan_json(
+        self, text: str
+    ) -> tuple[Optional[List[Dict[str, Any]]], Optional[Dict[str, Any]], bool]:
+        """
+        Scan ``text`` for trading-decision JSON at any position.
+
+        Returns (best_decisions, best_legacy, saw_invalid). Mirrors the
+        historical parsing semantics: for multi-stock format all valid
+        decision entries are collected; for legacy format the LAST valid
+        single action wins.
+        """
         decoder = json.JSONDecoder()
-
-        # Try to find a multi-stock "decisions" list first.
         best_decisions: Optional[List[Dict[str, Any]]] = None
-        # Fallback: legacy single action.
         best_legacy: Optional[Dict[str, Any]] = None
         saw_invalid = False
 
-        for match in re.finditer(r"[\[{]", response):
+        for match in re.finditer(r"[\[{]", text):
             try:
-                data, _ = decoder.raw_decode(response[match.start():])
+                data, _ = decoder.raw_decode(text[match.start():])
             except json.JSONDecodeError:
                 continue
 
@@ -848,6 +881,40 @@ class ExternalAIAgent(BaseAgent):
                 "reasoning": str(data.get("reasoning", "")).strip(),
             }
 
+        return best_decisions, best_legacy, saw_invalid
+
+    def _parse_response(self, response: str) -> Dict[str, Any]:
+        """
+        Extract a JSON action object from the AI response.
+
+        Supports both multi-stock and legacy single-stock formats:
+        - Multi-stock: ``{"decisions": [{"symbol", "action", "quantity",
+          "reasoning"}, ...]}``
+        - Legacy single-stock: ``{"action", "quantity", "reasoning"}``
+
+        Handles pure JSON, markdown code blocks, and JSON embedded in text.
+        When several valid objects appear, the LAST one wins.
+
+        For multi-stock format, all valid decision entries are collected.
+        For legacy format, a single action object is returned.
+        """
+        if not isinstance(response, str) or not response.strip():
+            raise ValueError("AI response was empty or not text")
+
+        # Pass 1: raw response. Pass 2+: progressively repaired variants
+        # (code fences, trailing commas, Python literals, single quotes).
+        best_decisions: Optional[List[Dict[str, Any]]] = None
+        best_legacy: Optional[Dict[str, Any]] = None
+        saw_invalid = False
+
+        for text in [response] + self._repair_json_candidates(response):
+            best_decisions, best_legacy, saw_invalid = self._scan_json(text)
+            if best_decisions is not None or best_legacy is not None:
+                break
+
+        if best_decisions is not None:
+            return {"decisions": best_decisions}
+
         if best_decisions is not None:
             return {"decisions": best_decisions}
         # Salvage pass for TRUNCATED responses (max_tokens cut-off): the
@@ -856,9 +923,10 @@ class ExternalAIAgent(BaseAgent):
         if best_decisions is None and '"decisions"' in response:
             salvaged: List[Dict[str, Any]] = []
             seen_items: List[Dict[str, Any]] = []
+            salvage_decoder = json.JSONDecoder()
             for match in re.finditer(r"\{", response):
                 try:
-                    data, _ = decoder.raw_decode(response[match.start():])
+                    data, _ = salvage_decoder.raw_decode(response[match.start():])
                 except json.JSONDecodeError:
                     continue
                 if not isinstance(data, dict):
@@ -915,7 +983,29 @@ class ExternalAIAgent(BaseAgent):
 
         prompt = self._build_prompt(observation)
         response = self._call_ai_api(prompt)
-        result = self._parse_response(response)
+        try:
+            result = self._parse_response(response)
+        except ValueError:
+            # Corrective retry: show the model its own invalid output and
+            # demand pure JSON. Recovers most remaining format mistakes at
+            # the cost of one extra API call.
+            repair_instruction = (
+                "Your previous response was NOT valid JSON and could not be "
+                "parsed. Respond again, corrected: output ONLY one raw JSON "
+                "object with a 'decisions' array covering every stock, each "
+                "entry having 'name', 'action' (buy/sell/hold), an integer "
+                "'quantity', and short 'reasoning'. No markdown fences, no "
+                "commentary before or after."
+            )
+            retry_messages = [
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": prompt},
+                {"role": "assistant", "content": response},
+                {"role": "user", "content": repair_instruction},
+            ]
+            response2 = self._call_ai_api("", messages=retry_messages)
+            result = self._parse_response(response2)
+            response = response2
 
         # Store conversation turn for memory.
         if self.enable_memory:

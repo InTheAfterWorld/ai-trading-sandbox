@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -7,26 +7,40 @@
 <link rel="icon" type="image/png" href="{{ url_for('static', filename='logo.png') }}">
 <style>
 :root{
-  --bg:#0b0e14;--bg-secondary:#111827;--card:#161b2a;--card-hover:#1d2335;
-  --border:#232b42;--border-hover:#3a4a6b;--text:#e2e8f0;--text-dim:#7c8aa5;
-  --purple:#a78bfa;--purple-strong:#8b5cf6;--blue:#60a5fa;
-  --green:#22c55e;--red:#ef4444;--yellow:#eab308;
-  --shadow-lg:0 20px 60px rgba(0,0,0,.35);--shadow-sm:0 4px 20px rgba(0,0,0,.25);
-  --radius:14px;--radius-lg:20px;
+  /* Stripe-style light palette */
+  --bg:#f6f9fc;--bg-secondary:#ffffff;--card:#ffffff;--card-hover:#f6f9fc;
+  --border:#e3e8ee;--border-hover:#c9d3df;--text:#0a2540;--text-dim:#425466;
+  --purple:#635bff;--purple-strong:#5851ec;--blue:#0073e6;
+  --green:#0e9f6e;--red:#e02d3c;--yellow:#d97706;
+  --shadow-lg:0 4px 8px rgba(0,0,0,.06),0 16px 32px rgba(0,0,0,.10);
+  --shadow-sm:0 1px 2px rgba(10,37,64,.06);
+  --radius:8px;--radius-lg:12px;
 }
+/* Optional dark variant */
+body.dark{
+  --bg:#0b1526;--bg-secondary:#10203a;--card:#122240;--card-hover:#16294a;
+  --border:#234067;--border-hover:#35598c;--text:#e6edf7;--text-dim:#93a5be;
+}
+/* Stripe-style gradient grid background */
+body::before{content:'';position:fixed;inset:0;z-index:-2;pointer-events:none;
+  background-image:linear-gradient(to right,rgba(99,91,255,.1) 1px,transparent 1px),
+                   linear-gradient(to bottom,rgba(99,91,255,.1) 1px,transparent 1px);
+  background-size:40px 40px;}
+body.dark::before{background-image:linear-gradient(to right,rgba(99,91,255,.14) 1px,transparent 1px),
+                   linear-gradient(to bottom,rgba(99,91,255,.14) 1px,transparent 1px);}
 *{box-sizing:border-box;margin:0;padding:0;}
 body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-apple-system,sans-serif;min-height:100vh;overflow-x:hidden;}
 /* Animated background */
 .bg-glow{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none;}
-.glow-orb{position:absolute;border-radius:50%;filter:blur(80px);opacity:.22;}
-.orb-1{width:400px;height:400px;background:var(--purple);top:-120px;left:-80px;animation:drift 14s ease-in-out infinite;}
-.orb-2{width:360px;height:360px;background:var(--blue);bottom:-100px;right:-60px;animation:drift 18s ease-in-out infinite reverse;}
-.orb-3{width:220px;height:220px;background:var(--green);top:50%;left:60%;opacity:.1;animation:drift 22s ease-in-out infinite;}
+.glow-orb{position:absolute;border-radius:50%;filter:blur(80px);opacity:.10;}
+.orb-1{width:400px;height:400px;background:var(--purple);top:-120px;left:-80px;animation:drift 14s ease-out infinite;}
+.orb-2{width:360px;height:360px;background:var(--blue);bottom:-100px;right:-60px;animation:drift 18s ease-out infinite reverse;}
+.orb-3{width:220px;height:220px;background:var(--green);top:50%;left:60%;opacity:.1;animation:drift 22s ease-out infinite;}
 @keyframes drift{0%,100%{transform:translate(0,0) scale(1)}33%{transform:translate(30px,-30px) scale(1.1)}66%{transform:translate(-20px,20px) scale(.95)}}
 /* Grid pattern overlay */
 .bg-grid{
   position:fixed;inset:0;z-index:-1;pointer-events:none;
-  background-image:linear-gradient(rgba(167,139,250,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(167,139,250,.03) 1px,transparent 1px);
+  background-image:linear-gradient(rgba(99,91,255,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(99,91,255,.04) 1px,transparent 1px);
   background-size:44px 44px;
   mask-image:radial-gradient(ellipse 80% 60% at 50% 40%,black,transparent);
   -webkit-mask-image:radial-gradient(ellipse 80% 60% at 50% 40%,black,transparent);
@@ -36,28 +50,28 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-ap
 .home{
   width:780px;max-width:94vw;display:grid;grid-template-columns:340px 1fr;
   background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);
-  overflow:hidden;box-shadow:var(--shadow-lg);animation:fadeUp .6s ease;
+  overflow:hidden;box-shadow:var(--shadow-lg);animation:fadeUp .6s ease-out;
 }
 @keyframes fadeUp{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
 @media(max-width:800px){.home{grid-template-columns:1fr;}}
 /* Left hero panel */
 .hero{
-  background:linear-gradient(160deg,rgba(139,92,246,.15),transparent 60%),var(--bg-secondary);
+  background:linear-gradient(160deg,rgba(99,91,255,.07),transparent 60%),var(--bg-secondary);
   border-right:1px solid var(--border);padding:36px 30px;display:flex;flex-direction:column;gap:18px;
 }
 @media(max-width:800px){.hero{border-right:none;border-bottom:1px solid var(--border);padding:28px;}}
 .logo-badge{
-  width:52px;height:52px;border-radius:14px;display:flex;align-items:center;justify-content:center;
-  background:linear-gradient(135deg,var(--purple),var(--purple-strong));font-size:26px;
-  box-shadow:0 6px 20px rgba(139,92,246,.3);animation:float 4s ease-in-out infinite;
+  width:52px;height:52px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+  background:var(--purple);font-size:26px;
+  box-shadow:0 2px 5px rgba(99,91,255,.4),inset 0 1px 0 rgba(255,255,255,.2);animation:float 4s ease-out infinite;
 }
 @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
 .hero h1{font-size:22px;font-weight:800;line-height:1.3;letter-spacing:-.02em;}
-.hero h1 .grad{background:linear-gradient(135deg,var(--purple),var(--blue));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+.hero h1 .grad{color:var(--purple);}
 .hero p{font-size:13px;color:var(--text-dim);line-height:1.7;}
 .hero-points{display:flex;flex-direction:column;gap:10px;margin-top:6px;}
 .hero-point{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--text);}
-.hero-point .ic{width:28px;height:28px;border-radius:8px;background:rgba(167,139,250,.12);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;}
+.hero-point .ic{width:28px;height:28px;border-radius:8px;background:rgba(99,91,255,.10);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;}
 .hero-foot{margin-top:auto;font-size:11px;color:var(--text-dim);opacity:.7;display:flex;gap:16px;}
 .hero-foot span{display:flex;align-items:center;gap:5px;}
 /* Right form panel */
@@ -84,7 +98,7 @@ body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,-ap
   transition:border-color .2s,box-shadow .2s;
 }
 .field input:hover{border-color:var(--border-hover);}
-.field input:focus{border-color:var(--purple);box-shadow:0 0 0 3px rgba(167,139,250,.1);}
+.field input:focus{border-color:var(--purple);box-shadow:0 0 0 3px rgba(99,91,255,.22);border-color:var(--purple);}
 /* Range slider: the generic .field input rule above injects padding/border/
    background that offset the thumb off the 0%–100% track. Reset and draw a
    custom track/thumb so both ends line up with the container. */
@@ -115,19 +129,21 @@ input[type="range"]:focus{outline:none;}
 }
 .btn-start{
   width:100%;display:flex;align-items:center;justify-content:center;gap:10px;
-  background:linear-gradient(135deg,var(--purple),var(--purple-strong));color:#fff;
-  border:none;border-radius:var(--radius);padding:14px 0;font-size:15px;font-weight:700;
-  cursor:pointer;transition:transform .15s,box-shadow .2s;font-family:inherit;
+  background:var(--purple);color:#fff;
+  border:none;border-radius:var(--radius);padding:14px 0;font-size:15px;font-weight:600;
+  cursor:pointer;transition:all .3s ease-out;font-family:inherit;
+  box-shadow:0 2px 5px rgba(99,91,255,.4),inset 0 1px 0 rgba(255,255,255,.2);
 }
-.btn-start:hover{transform:translateY(-2px);box-shadow:0 12px 32px rgba(139,92,246,.35);}
-.btn-start:active{transform:translateY(0);}
+.btn-start:hover{transform:translateY(-2px);box-shadow:0 4px 10px rgba(99,91,255,.35),inset 0 1px 0 rgba(255,255,255,.2);}
+.btn-start:active{transform:translateY(0) scale(.98);box-shadow:inset 0 2px 4px rgba(0,0,0,.2);}
+.btn-start:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none;}
 .btn-start:disabled{opacity:.5;cursor:not-allowed;transform:none;box-shadow:none;}
 /* Launch progress overlay: covers the home while /api/start initializes agents. */
 .launch-overlay{
   position:fixed;inset:0;z-index:400;display:none;align-items:center;justify-content:center;
-  background:rgba(11,14,20,.85);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
+  background:rgba(10,37,64,.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
 }
-.launch-overlay.show{display:flex;animation:fadeIn .2s ease;}
+.launch-overlay.show{display:flex;animation:fadeIn .2s ease-out;}
 .launch-card{
   background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);
   padding:32px 36px;width:360px;max-width:92vw;text-align:center;box-shadow:var(--shadow-lg);
@@ -149,8 +165,8 @@ input[type="range"]:focus{outline:none;}
   display:flex;align-items:center;justify-content:center;gap:5px;
 }
 .configure-btn{width:100%;background:transparent;color:var(--purple);border:1px solid var(--border-hover);border-radius:var(--radius);padding:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
-.configure-btn:hover{background:rgba(167,139,250,.08);border-color:var(--purple);}
-.trader-config{display:none;position:fixed;inset:0;z-index:5;background:rgba(5,7,12,.82);padding:24px;overflow:auto;}
+.configure-btn:hover{background:rgba(99,91,255,.08);border-color:var(--purple);}
+.trader-config{display:none;position:fixed;inset:0;z-index:5;background:rgba(10,37,64,.45);padding:24px;overflow:auto;}
 .trader-config.open{display:block;}
 .config-dialog{max-width:960px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);padding:26px;}
 .config-dialog-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;}
@@ -161,7 +177,7 @@ input[type="range"]:focus{outline:none;}
 .trader-head{padding:0 0 8px;border-bottom:1px solid var(--border);color:var(--text-dim);font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;}
 .trader-head span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .add-trader{display:flex;align-items:center;justify-content:center;gap:6px;width:100%;background:var(--bg-secondary);border:1px dashed var(--border-hover);border-radius:8px;color:var(--purple);padding:11px 14px;font:600 13px inherit;cursor:pointer;margin-bottom:14px;}
-.add-trader:hover{border-color:var(--purple);background:rgba(167,139,250,.08);}
+.add-trader:hover{border-color:var(--purple);background:rgba(99,91,255,.08);}
 .remove-trader{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:7px;color:var(--red);padding:9px 11px;cursor:pointer;font:600 13px inherit;line-height:1;}
 .remove-trader:hover{border-color:var(--red);background:rgba(239,68,68,.18);}
 .test-api{white-space:nowrap;background:var(--bg-secondary);border:1px solid var(--border-hover);border-radius:7px;color:var(--text);padding:9px 10px;cursor:pointer;font:12px inherit;}
@@ -171,12 +187,13 @@ input[type="range"]:focus{outline:none;}
 @media(max-width:700px){.trader-row{grid-template-columns:1fr 1fr;}.trader-head{display:none;}.test-api{width:100%;}.remove-trader{justify-self:end;}.test-status{grid-column:1/-1;}}
 
 /* ---------- Light theme ---------- */
-body.light{
-  --bg:#f3f5fa;--bg-secondary:#ffffff;--card:#ffffff;--card-hover:#eef2f8;
-  --border:#d9e0ec;--border-hover:#b7c3da;--text:#18213a;--text-dim:#5c6c8c;
+/* Dark variant */
+body.dark{
+  --bg:#0b1526;--bg-secondary:#10203a;--card:#122240;--card-hover:#16294a;
+  --border:#234067;--border-hover:#35598c;--text:#e6edf7;--text-dim:#93a5be;
 }
-body.light .glow-orb{opacity:.12;}
-body.light .trader-config{background:rgba(240,244,250,.85);}
+body.dark .glow-orb{opacity:.16;}
+body.dark .trader-config{background:rgba(11,21,38,.85);}
 .theme-toggle{
   position:fixed;top:16px;right:16px;z-index:300;width:40px;height:40px;
   display:flex;align-items:center;justify-content:center;font-size:18px;
@@ -184,12 +201,13 @@ body.light .trader-config{background:rgba(240,244,250,.85);}
   cursor:pointer;box-shadow:var(--shadow-sm);transition:border-color .15s,transform .15s;
 }
 .theme-toggle:hover{border-color:var(--purple);transform:translateY(-1px);}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms !important;transition-duration:.01ms !important;}}
 </style>
 </head>
 <body>
 <script>
 /* Apply saved theme before first paint to avoid a dark flash. */
-try{if(localStorage.getItem('ats_theme')==='light')document.body.classList.add('light');}catch(e){}
+try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('dark');}catch(e){}
 </script>
 
 <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle light / dark mode">🌙</button>
@@ -202,7 +220,7 @@ try{if(localStorage.getItem('ats_theme')==='light')document.body.classList.add('
     <!-- Left: hero -->
     <div class="hero">
       <div class="logo-badge"><img src="{{ url_for('static', filename='logo.png') }}" alt="ATS Logo" style="width:36px;height:36px;object-fit:contain;"></div>
-      <h1>AI Trading<br><span class="grad">Society</span></h1>
+      <h1>AI Trading<br><span class="grad">Sandbox</span></h1>
       <p>Watch autonomous AI agents analyze, react, and trade in a simulated market. Configure your simulation and dive in.</p>
       <div class="hero-points">
         <div class="hero-point"><span class="ic">AI</span> Multi-agent market simulation</div>
@@ -462,6 +480,25 @@ function saveTraderConfig(){autoSaveTraders();closeConfig();}
 function renderSummary(traders){const configured=(traders||[]).filter(t=>t.api_key).length;document.getElementById('configuredSummary').textContent=`${configured} of ${(traders||[]).length||7} traders configured`;}
 
 /* ---- Stock configuration ---- */
+// Preset sectors users can pick from when creating a stock.
+const SECTOR_PRESETS=[
+  '',
+  'AI & Chips',
+  'Software',
+  'E-commerce',
+  'Social Media',
+  'Banking',
+  'Energy',
+  'EV & Auto',
+  'Pharma & Biotech',
+  'Crypto & Fintech',
+  'Consumer Brands',
+  'Travel'
+];
+function sectorOptions(selected){
+  return SECTOR_PRESETS.map(p=>
+    `<option value="${p}"${p===selected?' selected':''}>${p||'— none —'}</option>`).join('');
+}
 function stockDefaults(){
   const c=loadStoredConfig();
   if(c.stocks&&c.stocks.length)return c.stocks;
@@ -473,12 +510,12 @@ function openStockConfig(){
 }
 function closeStockConfig(){document.getElementById('stockConfig').classList.remove('open');}
 function renderStockRows(stocks){
-  const head=`<div class="trader-row trader-head" style="grid-template-columns:1.2fr 0.8fr 0.7fr 1fr auto;"><span>Name</span><span>Price</span><span>Holdings</span><span>Sector / Tag</span><span></span></div>`;
+  const head=`<div class="trader-row trader-head" style="grid-template-columns:1.2fr 0.8fr 0.7fr 1fr auto;"><span>Name</span><span>Price</span><span>Holdings</span><span>Sector</span><span></span></div>`;
   const rows=stocks.map((s,i)=>`<div class="trader-row" data-index="${i}" style="grid-template-columns:1.2fr 0.8fr 0.7fr 1fr auto;">
     <input data-field="name" value="${esc(s.name||`Stock ${i+1}`)}" placeholder="Stock ${i+1}" oninput="autoSaveStocks()">
     <input data-field="price" type="number" value="${esc(s.price||100)}" min="0.01" step="1" oninput="autoSaveStocks()">
     <input data-field="hold" type="number" value="${esc(s.hold||0)}" min="0" step="1" oninput="autoSaveStocks()">
-    <input data-field="sector" value="${esc(s.sector||'')}" placeholder="e.g. AI chips, Mega Bank" oninput="autoSaveStocks()">
+    <select data-field="sector" onchange="autoSaveStocks()" title="Sector shown to AI agents in their prompts">${sectorOptions(s.sector||'')}</select>
     <button class="remove-trader" onclick="removeStock(this)" title="Remove stock">×</button>
   </div>`).join('');
   document.getElementById('stockRows').innerHTML=head+rows;
@@ -527,11 +564,12 @@ function showError(msg){
 function applyThemeButton(){
   const btn=document.getElementById('themeToggle');
   if(!btn)return;
-  btn.textContent=document.body.classList.contains('light')?'☀️':'🌙';
+  btn.textContent=document.body.classList.contains('dark')?'🌙':'☀️';
 }
 function toggleTheme(){
-  const light=document.body.classList.toggle('light');
-  try{localStorage.setItem('ats_theme',light?'light':'dark');}catch(e){}
+  const goingDark=!document.body.classList.contains('dark');
+  document.body.classList.toggle('dark',goingDark);
+  try{localStorage.setItem('ats_theme',goingDark?'dark':'light');}catch(e){}
   applyThemeButton();
 }
 applyThemeButton();

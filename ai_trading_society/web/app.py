@@ -1,4 +1,4 @@
-"""
+﻿"""
 Web UI for AI TRADING SANDBOX.
 
 A Flask-based dashboard that runs the simulation step-by-step
@@ -440,6 +440,9 @@ def api_start():
             "price": round(sm.price, 2),
             "initial_price": round(sm.initial_price, 2),
             "price_history": [round(p, 2) for p in sm.price_history],
+            "volume": sm.volume_history[-1] if sm.volume_history else 0,
+            "sector": sm.sector,
+            "blurb": sm.blurb,
         }
         for sm in env.stocks.values()
     ]
@@ -531,14 +534,21 @@ def api_step():
         delta = wealth - prev_w
 
         # Performance grade from this agent's wealth curve so far.
-        # NOTE: state["history"] already includes this round's snapshot, so the
-        # curve must NOT be extended with the live wealth again (double count).
-        wealth_curve = [
-            snap.get("agents", {}).get(aid, {}).get("wealth", 0)
-            for snap in state.get("history", [])
-        ]
+        # NOTE 1: state["history"] is appended AFTER this block, so it does NOT
+        # yet contain this round — add the live wealth as the latest point.
+        # NOTE 2: each snapshot's "agents" is a LIST of dicts here (unlike
+        # Simulator.state_history where it is a dict keyed by agent id).
+        wealth_curve = []
+        for snap in state.get("history", []):
+            ags = snap.get("agents", [])
+            if isinstance(ags, dict):
+                ags = [ags.get(aid, {})]
+            for entry in ags:
+                if isinstance(entry, dict) and entry.get("id") == aid:
+                    wealth_curve.append(entry.get("wealth", 0))
+                    break
         if init_w > 0:
-            g = grade_wealth_curve(wealth_curve or [wealth], init_w)
+            g = grade_wealth_curve(wealth_curve + [wealth], init_w)
         else:
             g = {"score": 0, "grade": "D"}
 
@@ -575,6 +585,8 @@ def api_step():
             "initial_price": round(sm.initial_price, 2),
             "price_history": [round(p, 2) for p in sm.price_history],
             "volume": sm.volume_history[-1] if sm.volume_history else 0,
+            "sector": sm.sector,
+            "blurb": sm.blurb,
         }
         for sm in env.stocks.values()
     ]
