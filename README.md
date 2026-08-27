@@ -4,8 +4,7 @@
 
 # AI Trading Sandbox
 
-A multi-agent stock market sandbox where LLM traders with distinct personalities
-trade multiple stocks while market events fire.
+A multi-agent stock market sandbox where autonomous LLM traders with distinct personalities, memories, and social relationships interact in a synthetic economy—creating a controlled environment for studying emergent behavior.
 
 <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 <img alt="Python" src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue">
@@ -14,19 +13,56 @@ trade multiple stocks while market events fire.
 
 </div>
 
+<p align="center">
+  <img src="assets/demo.png" alt="AI Trading Sandbox demo" width="900">
+</p>
+
 > [!WARNING]
 > Simulation for studying AI behavior — **not a trading system, not financial advice**.
 
+## Table of Contents
+
+- [What is this?](#what-is-this)
+- [Features](#features)
+- [The Traders](#the-traders)
+- [How a Simulation Works](#how-a-simulation-works)
+- [Emergent Behavior](#emergent-behavior)
+- [Quick Start](#quick-start)
+  - [CLI](#cli)
+  - [Keyboard shortcuts (web)](#keyboard-shortcuts-web)
+- [Configuration](#configuration)
+- [Personality Presets](#personality-presets)
+- [As a Library](#as-a-library)
+- [API Reference](#api-reference)
+- [Project Structure](#project-structure)
+- [Contributing](#contributing)
+- [License](#license)
+
+## What is this?
+
+Imagine putting different AI traders into the same artificial stock market, 
+and let them compete, adapt, and shape the market on their own.
+
+Each trader has its own personality, memory, portfolio, and relationships with
+other traders. They all observe and trade in the same market, but can make completely
+different decisions.
+
+As traders buy and sell, they change the market itself. Events affect the
+traders, traders affect prices, and those new prices influence the next round
+of decisions.
+
+The result is a controllable environment for exploring how complex behavior
+can emerge from interactions between autonomous AI agents.
+
 ## Features
 
-- **LLM traders** — OpenAI, Anthropic, Google Gemini, or any OpenAI-compatible endpoint.
+- **LLM traders** — Multiple LLM-powered traders compete in this market.
   A hardened prompt plus JSON structured-output mode (with automatic fallback)
   keeps every decision a valid `{"decisions": [...], ...}` object.
 - **Multiple stocks** — configure any number of stocks, each with its own price,
-  order book, **sector tag and company blurb** fed to the agents' prompts.
-- **Synthetic history** — each stock gets a seed-reproducible random-walk
-  pre-history ending exactly at its current price, so agents analyze real trends
-  from the very first round.
+  order book, **sector tag, and company blurb** fed to the agents' prompts.
+- **Synthetic history** — each stock gets a seed-reproducible random walk
+  pre-history so agents analyze real trends from the very first round.
 - **Personality traits** — panic, greed, FOMO, stubbornness, loss aversion,
   overconfidence, regret avoidance; individually or as presets.
 - **Human player** — join as a trader or spectate; trade from the web dashboard.
@@ -34,16 +70,93 @@ trade multiple stocks while market events fire.
   stock; company-specific ones hit one).
 - **Agent memory** — short-term decision summaries plus long-term memory of key events.
 - **Learning feedback** — each agent sees its last round's fills and their
-  price moves since execution, so it can learn from its own outcomes.
-- **Parallel rounds** — every trader's LLM call fires concurrently each round
-  (per-agent deterministic RNG streams keep seeded runs reproducible);
-  `MarketConfig(parallel_agents=False)` restores strict sequential mode.
+  price moves since execution to learn from its own outcomes.
 - **Grading** — every agent gets a blended 0-100 score + S/A/B/C/D grade from
-  return, Sharpe, drawdown and win rate (web badges + CLI tags).
+  return, Sharpe, drawdown, and win rate.
 - **Social influence** — idol/friends/enemies relationships drive herding and fading.
 - **God Mode** — inject events and tune market parameters live.
 - **Replay & reports** — per-round snapshots, event timeline replay, agent decision
-  logs, one-click self-contained HTML report with shareable read-only link.
+  logs, one-click self-contained HTML report with shareable link.
+
+## The Traders
+
+Each trader has
+
+- Personality
+    - greed
+    - panic
+    - FOMO
+    - stubbornness
+    - loss aversion
+    - overconfidence
+    - regret avoidance
+
+- Memory
+
+    - recent decisions
+    - important past events
+    - previous outcomes
+
+- Portfolio
+
+    - cash
+    - holdings
+    - realized/unrealized performance
+
+- Social relationships
+
+    - idols
+    - friends
+    - enemies
+
+- Market perception
+
+    - current prices
+    - trends
+    - events
+    - available information
+ 
+Two traders can receive the same market information and still make completely different decisions.
+
+## How a Simulation Works
+
+Each round follows the same cycle:
+
+```text
+Market State
+     ↓
+Agent Observations
+     ↓
+Personality + Memory + Social Relationships
+     ↓
+AI Decisions
+     ↓
+Orders & Trades
+     ↓
+Price / Portfolio Updates
+     ↓
+Feedback & Memory
+     ↓
+Next Round
+```
+
+## Emergent Behavior
+
+The sandbox does not just tell each agent what to do. Instead,
+interesting behaviors can emerge from interactions between agents and the market.
+
+Examples include:
+
+- **Herding** — traders converge on the same decision.
+- **Panic selling** — negative events trigger waves of selling.
+- **FOMO** — rising prices attract increasingly aggressive buyers.
+- **Contrarian behavior** — traders move against the crowd.
+- **Social cascades** — one trader's behavior influences others.
+- **Overreaction** — agents respond disproportionately to new information.
+- **Behavioral persistence** — previous experiences affect future decisions.
+
+These behaviors are to be explored.
+
 
 ## Quick Start
 
