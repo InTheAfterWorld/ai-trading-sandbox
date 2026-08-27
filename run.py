@@ -67,7 +67,9 @@ def main():
         print(f"  Open http://localhost:{args.port} in your browser")
         print("=" * 55 + "\n")
 
-        app.run(debug=args.debug, port=args.port)
+        # Loopback only -- the dashboard has no auth. Use a reverse
+        # proxy with authentication if you need to expose it.
+        app.run(host="127.0.0.1", debug=args.debug, port=args.port)
 
 
 if __name__ == "__main__":

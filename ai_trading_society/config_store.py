@@ -49,6 +49,23 @@ def get_config_path() -> Path:
     return CONFIG_PATH
 
 
+def redact_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy safe to send to a browser.
+
+    Every trader ``api_key`` is blanked and replaced with a
+    ``has_api_key`` boolean the UI uses to show a "saved" state. The
+    real keys never leave the server: ``GET/POST /api/config`` return
+    this shape, and :func:`save_config` restores a blanked key from
+    disk (by trader name) so editing another field cannot wipe it.
+    """
+    out = dict(cfg)
+    out["traders"] = [
+        {**t, "api_key": "", "has_api_key": bool(t.get("api_key"))}
+        for t in cfg.get("traders", [])
+    ]
+    return out
+
+
 def _normalize_traders(traders: Any) -> list:
     """Coerce a raw traders payload into a clean list of dicts."""
     if not isinstance(traders, list):
@@ -230,7 +247,21 @@ def save_config(data: Dict[str, Any], path: Optional[str] = None) -> Dict[str, A
     """
     cfg = dict(DEFAULT_CONFIG)
     _apply_scalar_fields(cfg, data)
-    cfg["traders"] = _normalize_traders(data.get("traders", cfg["traders"]))
+    incoming = _normalize_traders(data.get("traders", cfg["traders"]))
+    if "traders" in data:
+        # The browser never holds real keys (see redact_config), so an
+        # autosave posts api_key="" for every trader. Restore each
+        # blanked key from the stored config, matched by trader name,
+        # so saving an unrelated field is not a silent credential wipe.
+        stored = {
+            t.get("name"): t.get("api_key", "")
+            for t in load_config(path).get("traders", [])
+            if t.get("name")
+        }
+        for t in incoming:
+            if not t.get("api_key") and stored.get(t.get("name")):
+                t["api_key"] = stored[t["name"]]
+    cfg["traders"] = incoming
     _migrate_legacy_stocks(cfg, data)
 
     cfg_path = Path(path) if path else Path(CONFIG_PATH)

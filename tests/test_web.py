@@ -68,6 +68,9 @@ def test_api_config_post_and_get(client, tmp_config_path):
     saved = post_res.get_json()["config"]
     assert saved["steps"] == 12
     assert saved["price"] == 250
+    # By default the homepage gets its keys back so it can repopulate on load
+    # (the Host allowlist keeps this endpoint local-only). ATS_REDACT_CONFIG=1
+    # opts out -- covered in test_secret_handling.py.
     assert saved["traders"][0]["api_key"] == "k"
 
     get_res = client.get("/api/config")
@@ -76,6 +79,7 @@ def test_api_config_post_and_get(client, tmp_config_path):
     assert data["cash"] == 5000
     assert data["hold"] == 10
     assert data["traders"][0]["provider"] == "groq"
+    assert data["traders"][0]["api_key"] == "k"
 
 
 def test_api_config_persists_homepage_adjustments(client, tmp_config_path):

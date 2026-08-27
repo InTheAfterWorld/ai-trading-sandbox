@@ -32,7 +32,11 @@ from ai_trading_society.agents.external_ai_agent import (
 from ai_trading_society.agents.player_agent import PlayerAgent
 from ai_trading_society.agents.roster import build_agent_roster, resolve_social_map
 from ai_trading_society.config import MarketConfig, StockSpec
-from ai_trading_society.config_store import load_config, save_config
+from ai_trading_society.config_store import (
+    load_config,
+    redact_config,
+    save_config,
+)
 from ai_trading_society.console_utils import (
     agent_personality,
     agent_personality_desc,
@@ -47,6 +51,43 @@ app = Flask(__name__, template_folder="../../templates", static_folder="../../st
 # Never fall back to a hard-coded secret: it would let an attacker on the
 # local network forge session cookies. Generate a fresh random key per boot.
 app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.urandom(24)
+
+# --- DNS-rebinding protection -------------------------------------------------
+# The dashboard binds to loopback and has no auth, so GET /api/config can hand
+# the browser the stored trader API keys (that is the point of the shared
+# config -- reload the page, keys are already there). The one way a remote
+# page could still reach that endpoint is DNS rebinding: it resolves its own
+# domain to 127.0.0.1 so the browser treats it as same-origin, and the
+# request then carries `Host: attacker-domain`. Requiring a known-local Host
+# closes that path. Override the list when fronting the app with a proxy.
+_ALLOWED_HOSTS = {
+    h.strip().lower()
+    for h in os.environ.get(
+        "ATS_ALLOWED_HOSTS", "localhost,127.0.0.1,[::1]"
+    ).split(",")
+    if h.strip()
+}
+
+
+def _request_hostname() -> str:
+    """The Host header with any port stripped, lower-cased ('' if absent)."""
+    raw = (request.host or "").strip().lower()
+    if raw.startswith("["):            # IPv6 literal: [::1]:5000 -> [::1]
+        return raw.split("]", 1)[0] + "]"
+    return raw.split(":", 1)[0]         # 127.0.0.1:5000 -> 127.0.0.1
+
+
+def _redact_config_responses() -> bool:
+    """Whether GET/POST /api/config withhold the real trader API keys.
+
+    Default False: this is a single-user local tool, the keys already sit in
+    user_config.json, and having the browser reload them every visit is the
+    convenience the shared config exists for. Set ATS_REDACT_CONFIG=1 to
+    withhold them anyway (screen-sharing the dashboard, running it on a box
+    other people can reach, etc.).
+    """
+    return os.environ.get("ATS_REDACT_CONFIG") == "1"
+
 
 # Exported HTML reports live here and are served as read-only snapshots.
 # Anchored to the project root so saving (CWD-relative open) and serving
@@ -179,6 +220,20 @@ def _aggregate_actions(stock_acts, first_symbol: str = "ATSX"):
 
 
 @app.before_request
+def block_dns_rebinding():
+    """Reject any request whose Host header is not a known local name.
+
+    See _ALLOWED_HOSTS: this is what makes it safe for /api/config to return
+    real API keys to the local browser. A request with no Host at all (some
+    HTTP/1.0 clients) is allowed through; the loopback bind already covers it.
+    """
+    host = _request_hostname()
+    if host and host not in _ALLOWED_HOSTS:
+        return jsonify({"error": "Host not allowed."}), 403
+    return None
+
+
+@app.before_request
 def csrf_protect():
     """Reject cross-origin state-changing requests (CSRF / DNS rebinding).
 
@@ -242,8 +297,16 @@ def sim():
 
 @app.route("/api/config", methods=["GET"])
 def api_get_config():
-    """Return the saved user configuration (shared with CLI and the homepage)."""
-    return jsonify({"config": load_config()})
+    """Return the saved user configuration (shared with CLI and the homepage).
+
+    By default this includes the stored trader API keys so the homepage can
+    repopulate itself on every load. The Host allowlist (see
+    block_dns_rebinding) keeps that reachable only from a local browser. Set
+    ATS_REDACT_CONFIG=1 to strip the keys and return a ``has_api_key`` flag
+    instead.
+    """
+    cfg = load_config()
+    return jsonify({"config": redact_config(cfg) if _redact_config_responses() else cfg})
 
 
 @app.route("/api/config", methods=["POST"])
@@ -255,6 +318,8 @@ def api_save_config():
     """
     data = request.get_json(silent=True) or {}
     saved = save_config(data)
+    if _redact_config_responses():
+        saved = redact_config(saved)
     return jsonify({"ok": True, "config": saved})
 
 
@@ -297,6 +362,20 @@ def api_start():
     model = data.get("model") or _DEFAULT_MODELS.get(provider) or "gpt-4o"
     api_key = data.get("api_key", "")
     trader_configs = data.get("traders")
+    if isinstance(trader_configs, list):
+        # Safety net: if the launch payload has a trader with no api_key
+        # (ATS_REDACT_CONFIG mode, or a stale browser), fill it from
+        # user_config.json, matched by trader name.
+        _stored_keys = {
+            t.get("name"): t.get("api_key", "")
+            for t in load_config().get("traders", [])
+            if t.get("name")
+        }
+        for _t in trader_configs:
+            if isinstance(_t, dict) and not _t.get("api_key"):
+                _match = _stored_keys.get(_t.get("name"))
+                if _match:
+                    _t["api_key"] = _match
     seed = data.get("seed")
     if seed is not None:
         try:
@@ -476,6 +555,14 @@ def api_test_api():
     provider = str(data.get("provider", "openai")).strip() or "openai"
     model = str(data.get("model", "gpt-4o")).strip() or "gpt-4o"
     base_url = str(data.get("base_url", "")).strip() or None
+    if not api_key:
+        # The browser may not hold the key; look it up by trader name.
+        _name = str(data.get("name", "")).strip()
+        if _name:
+            for _t in load_config().get("traders", []):
+                if _t.get("name") == _name and _t.get("api_key"):
+                    api_key = _t["api_key"]
+                    break
     if not api_key:
         return jsonify({"ok": False, "error": "API key is required."}), 400
     try:
@@ -1084,5 +1171,12 @@ if __name__ == "__main__":
     print("  AI TRADING SANDBOX — Web Dashboard")
     print("  Open http://localhost:5000 in your browser")
     print("=" * 50 + "\n")
-    app.run(debug=False, port=5000)
+    # Bind to loopback only: this app has no authentication and the
+    # God-Mode / config endpoints are unprotected. Debug (the Werkzeug
+    # debugger = RCE on any unhandled error) is opt-in via ATS_DEBUG=1.
+    app.run(
+        host="127.0.0.1",
+        port=5000,
+        debug=os.environ.get("ATS_DEBUG") == "1",
+    )
 
