@@ -13,6 +13,7 @@ can mark it as failed and display it accordingly.
 import json
 import math
 import re
+import time
 from typing import Any, Dict, List, Optional, cast
 
 from ..base_agent import BaseAgent
@@ -62,6 +63,80 @@ _DEFAULT_MAX_TOKENS: Dict[str, int] = {
 # JSON decision list (each stock ≈ 80 tokens), small enough to stop a chatty
 # model from writing essays. 2048 comfortably fits 5 stocks + reasoning.
 _DEFAULT_MAX_TOKENS_FALLBACK = 2048
+
+# HTTP statuses worth exactly one automatic retry: rate limiting and
+# transient server-side failures. Auth (401/403) and malformed requests
+# (400) are excluded - they fail identically the second time.
+_RETRYABLE_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
+
+# Corrective re-asks (see _retry_with_escalation) each cost an extra API
+# call. Cap how many a single agent may spend across a whole run so one
+# badly-behaved model cannot multiply the cost and latency of every round.
+_DEFAULT_REPAIR_BUDGET = 6
+
+
+def _error_status(exc: BaseException) -> Optional[int]:
+    """Best-effort HTTP status code from a provider exception."""
+    for attr in ("status_code", "status"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, int):
+            return value
+    return None
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """Whether an API failure is worth exactly one retry.
+
+    A timeout, rate limit or 5xx is usually gone a second later. Without a
+    retry it costs the agent its whole round: MarketEnv records an AI
+    failure and forces a hold on every stock.
+    """
+    status = _error_status(exc)
+    if status is not None and status in _RETRYABLE_STATUS:
+        return True
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    return type(exc).__name__ in {
+        "APITimeoutError",
+        "APIConnectionError",
+        "RateLimitError",
+        "InternalServerError",
+        "ServiceUnavailableError",
+    }
+
+
+# Phrases a provider uses when it rejects the structured-output parameter.
+# Deliberately specific to response_format / JSON mode: generic wording like
+# "unsupported parameter" also covers rejections that have nothing to do with
+# structured output, and matching those would silently disable JSON mode (and
+# burn a second request) over an unrelated BadRequestError.
+_JSON_MODE_REJECTION_TOKENS = (
+    "response_format",
+    "json_object",
+    "json_schema",
+    "json mode",
+    "structured output",
+)
+
+
+def _is_json_mode_rejection(exc: BaseException, openai_mod: Any) -> bool:
+    """Whether an exception means the provider rejected JSON output mode.
+
+    Providers signal this as a 400 naming the offending parameter. Every
+    other failure -- 401, 429, timeout, 5xx -- must propagate instead: a
+    blanket retry would double the load at the worst possible moment and
+    permanently disable JSON mode on the strength of an unrelated error.
+    """
+    bad_request = getattr(openai_mod, "BadRequestError", None)
+    is_bad_request = (
+        (isinstance(bad_request, type) and isinstance(exc, bad_request))
+        or _error_status(exc) == 400
+        or type(exc).__name__ in {"BadRequestError", "UnprocessableEntityError"}
+    )
+    if not is_bad_request:
+        return False
+    text = str(exc).lower()
+    return any(token in text for token in _JSON_MODE_REJECTION_TOKENS)
 
 
 class ExternalAIAgent(BaseAgent):
@@ -125,6 +200,7 @@ class ExternalAIAgent(BaseAgent):
         memory_window: int = 6,
         enable_memory: bool = True,
         max_tokens: Optional[int] = None,
+        repair_budget: int = _DEFAULT_REPAIR_BUDGET,
     ):
         super().__init__(agent_id, cash, holdings)
         self.api_provider = api_provider
@@ -171,6 +247,11 @@ class ExternalAIAgent(BaseAgent):
         # Whether the provider accepted JSON structured-output mode. Toggled
         # off automatically the first time a provider rejects the parameter.
         self._json_mode_supported: bool = True
+
+        # Remaining corrective re-ask calls for this agent's whole run.
+        self._repair_calls_remaining: int = max(0, int(repair_budget))
+        # Pause before retrying a transient API failure, in seconds.
+        self.retry_backoff: float = 1.0
 
     # ------------------------------------------------------------------
     # Prompt construction
@@ -499,6 +580,33 @@ class ExternalAIAgent(BaseAgent):
             prompt, messages=messages, system_prompt=system_prompt
         )
 
+    def _call_ai_api_with_retry(
+        self,
+        prompt: str,
+        messages: Optional[list] = None,
+        system_prompt: Optional[str] = None,
+    ) -> str:
+        """Call the provider, retrying once on a transient failure.
+
+        Rate limits, timeouts and 5xx responses are the common failure mode
+        when several agents call the same provider concurrently, and they
+        usually clear within a second. Retrying once here is much cheaper
+        than losing the agent's entire round. Permanent failures (bad key,
+        unknown model, malformed request) propagate immediately.
+        """
+        try:
+            return self._call_ai_api(
+                prompt, messages=messages, system_prompt=system_prompt
+            )
+        except Exception as exc:
+            if not _is_transient_error(exc):
+                raise
+            if self.retry_backoff > 0:
+                time.sleep(self.retry_backoff)
+            return self._call_ai_api(
+                prompt, messages=messages, system_prompt=system_prompt
+            )
+
     _HTML_START_RE = re.compile(r"\s*(?:<!doctype\s+html|<html[\s>])", re.IGNORECASE)
 
     def _reject_html(self, content: str) -> str:
@@ -584,8 +692,8 @@ class ExternalAIAgent(BaseAgent):
             kwargs["response_format"] = {"type": "json_object"}
         try:
             response = client.chat.completions.create(**kwargs)
-        except Exception:
-            if not use_json_mode:
+        except Exception as exc:
+            if not use_json_mode or not _is_json_mode_rejection(exc, openai):
                 raise
             # Provider rejected response_format — remember and retry plain.
             self._json_mode_supported = False
@@ -895,7 +1003,11 @@ class ExternalAIAgent(BaseAgent):
     _THOUGHT_TOKENS_RE = re.compile(
         r"<\|begin_of_thought\|>.*?<\|end_of_thought\|>\s*", re.DOTALL
     )
-    _THINK_UNCLOSED_RE = re.compile(r"<think>.*", re.DOTALL | re.IGNORECASE)
+    # Anchored at the start: an unclosed <think> only means "truncated
+    # mid-thought" when the reasoning opens the response. Unanchored, this
+    # deleted everything after a literal "<think>" appearing inside a JSON
+    # string value, destroying an otherwise valid decision payload.
+    _THINK_UNCLOSED_RE = re.compile(r"^\s*<think>.*", re.DOTALL | re.IGNORECASE)
     _THINK_ORPHAN_CLOSE_RE = re.compile(r"^.*</think>\s*", re.DOTALL | re.IGNORECASE)
 
     def _strip_reasoning(self, response: str) -> str:
@@ -1014,8 +1126,15 @@ class ExternalAIAgent(BaseAgent):
         constraints. Attempt 3 offers a fill-in JSON template that leaves
         almost no room for format errors.
 
+        Each attempt spends one call from ``_repair_calls_remaining``, a
+        per-run budget: without it a model that never emits valid JSON would
+        cost 4 API calls per agent per round for the whole simulation.
+
         Returns (parsed_result, last_response) on the first success. Raises
-        the last parse error when every attempt fails.
+        the last parse error when every attempt fails or the budget runs out.
+        Errors raised by the API itself are NOT caught here -- an unreachable
+        provider is a transport failure, not a formatting one, and re-asking
+        it with a stricter prompt cannot help.
         """
         stocks = observation.get("stocks", [])
         if stocks:
@@ -1070,6 +1189,9 @@ class ExternalAIAgent(BaseAgent):
 
         last_error = parse_error
         for attempt, instruction in enumerate(repair_instructions):
+            if self._repair_calls_remaining <= 0:
+                break
+            self._repair_calls_remaining -= 1
             if attempt == 0:
                 retry_messages = [
                     {"role": "system", "content": self.system_prompt},
@@ -1112,16 +1234,20 @@ class ExternalAIAgent(BaseAgent):
             raise RuntimeError(f"Agent {self.agent_id}: no API key configured")
 
         prompt = self._build_prompt(observation)
-        response = self._call_ai_api(prompt)
+        response = self._call_ai_api_with_retry(prompt)
         try:
             result = self._parse_response(response)
         except ValueError as parse_error:
+            if self._repair_calls_remaining <= 0:
+                # Budget spent: this model has already proved it cannot
+                # produce parseable JSON, so stop paying for re-asks.
+                raise
             # Corrective retries with escalating strategies: (1) show the
             # model its own invalid output and demand pure JSON, (2) retry
             # with a minimal prompt free of memory context that may distract
             # a weak or reasoning-heavy model, (3) offer a fill-in template
             # that leaves almost no room for format errors. Each attempt
-            # costs one extra API call.
+            # costs one extra API call, drawn from _repair_calls_remaining.
             result, response = self._retry_with_escalation(
                 observation, prompt, response, parse_error
             )
@@ -1189,6 +1315,8 @@ class ExternalAIAgent(BaseAgent):
             messages.extend(history)
         messages.append({"role": "user", "content": message})
 
-        return self._call_ai_api(message, messages=messages, system_prompt=system_prompt)
+        return self._call_ai_api_with_retry(
+            message, messages=messages, system_prompt=system_prompt
+        )
 
 

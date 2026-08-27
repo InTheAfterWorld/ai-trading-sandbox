@@ -512,6 +512,10 @@ class EventManager:
     event_probability_multiplier : float
         Multiplier for base event probabilities. Higher = more events.
         Default 1.0. Set to 0 to disable events.
+    impact_scale : float
+        Fraction of an active event's headline impact applied per step,
+        so the full impact is spread across the event's duration.
+        Mirrors ``MarketConfig.event_impact_scale``.
     """
 
     def __init__(
@@ -520,9 +524,11 @@ class EventManager:
         event_probability_multiplier: float = 1.0,
         rng: Optional[Union[random.Random, ModuleType]] = None,
         stock_names: Optional[List[str]] = None,
+        impact_scale: float = 0.3,
     ):
         self.templates = templates or EVENT_TEMPLATES.copy()
         self.multiplier = event_probability_multiplier
+        self.impact_scale = impact_scale
         # RNG for event triggering; allow injection for reproducibility.
         # Default to the global random module so external seeding still works.
         self.rng = rng if rng is not None else random
@@ -690,8 +696,13 @@ class EventManager:
             if event.is_active() and event.affects_stock(symbol):
                 # Decay impact over duration
                 decay = event.remaining_steps / event.duration_steps
-                price_impact += event.price_impact * decay * 0.3  # Scale down per-step
-                sentiment_shift += event.sentiment_shift * decay * 0.3
+                # Scale down per-step: the headline impact is spread
+                # across the event's duration (see
+                # MarketConfig.event_impact_scale).
+                price_impact += event.price_impact * decay * self.impact_scale
+                sentiment_shift += (
+                    event.sentiment_shift * decay * self.impact_scale
+                )
 
         return {
             "price_impact": price_impact,

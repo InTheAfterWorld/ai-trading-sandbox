@@ -19,11 +19,25 @@ from dataclasses import dataclass, field
 from types import ModuleType
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from .agents.external_ai_agent import ExternalAIAgent
 from .base_agent import BaseAgent
 from .config import MarketConfig
 from .market_events import EventManager
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_quantity(value: Any) -> int:
+    """Normalize a decision quantity to a non-negative int.
+
+    Delegates to the agent-side parser so a model answering "10 shares",
+    "all" or null is interpreted identically whether the value is read here
+    or in ExternalAIAgent. A bare int() call raised ValueError/TypeError on
+    such input, which cost the agent its entire round.  Anything genuinely
+    uninterpretable becomes 0, i.e. a hold.
+    """
+    quantity = ExternalAIAgent._coerce_quantity(value)
+    return max(0, quantity if quantity is not None else 0)
 
 
 @dataclass
@@ -176,11 +190,24 @@ class MarketEnv:
         self.trade_history: List[TradeRecord] = []
         self._agent_error_counts: Dict[str, int] = {}
 
+        # --- Fill indexes -------------------------------------------------
+        # Maintained incrementally by _execute_trade so neither step() nor
+        # get_observation() ever has to rescan the full trade history. Without
+        # them a run costs O(agents * steps * total_trades) just to answer
+        # "what did I fill last round?".
+        # Fills executed during the CURRENT step: {(agent_id, symbol): qty}.
+        self._step_fills: Dict[Tuple[str, str], int] = {}
+        # Trades from the most recent step that produced any fill, grouped by
+        # agent, for last-round observation feedback.
+        self._last_fill_step: int = 0
+        self._last_fills_by_agent: Dict[str, List[TradeRecord]] = {}
+
         # --- Event system ---
         self.event_manager: EventManager = EventManager(
             event_probability_multiplier=config.event_probability_multiplier,
             rng=self.rng,
             stock_names=list(self.stocks.keys()),
+            impact_scale=config.event_impact_scale,
         )
 
         # --- Social influence ---
@@ -254,6 +281,24 @@ class MarketEnv:
             return next(iter(self.stocks.values())).volume_history
         return []
 
+    # ------------------------------------------------------------------
+    # Portfolio valuation
+    # ------------------------------------------------------------------
+
+    def agent_wealth(self, agent: Union[str, BaseAgent]) -> float:
+        """Mark-to-market portfolio wealth: cash + sum(holdings * price).
+
+        Accepts an agent id or the agent object itself. This is the single
+        definition of "wealth" in the project: the CLI simulator, the web API
+        and the report exporter all call it, so a change to how a portfolio is
+        valued cannot drift between them.
+        """
+        obj = self.agents[agent] if isinstance(agent, str) else agent
+        holdings = obj.holdings if isinstance(obj.holdings, dict) else {}
+        return obj.cash + sum(
+            holdings.get(sym, 0) * sm.price for sym, sm in self.stocks.items()
+        )
+
     def _backfill_pre_history(self, sm: "StockMarket", steps: int) -> None:
         """Generate ``steps`` synthetic prices ending exactly at the stock's
         current price (a de-drifted random walk, always positive)."""
@@ -317,7 +362,7 @@ class MarketEnv:
                 act = str(d.get("action", "hold")).lower()
                 if act not in ("buy", "sell", "hold"):
                     raise ValueError(f"invalid action: {act!r}")
-                qty = max(0, int(d.get("quantity", 0)))
+                qty = _coerce_quantity(d.get("quantity", 0))
                 result.append({
                     "name": stk_name,
                     "symbol": stk_name,
@@ -344,7 +389,7 @@ class MarketEnv:
         act = str(action.get("action", "hold")).lower()
         if act not in ("buy", "sell", "hold"):
             raise ValueError(f"invalid action: {act!r}")
-        qty = max(0, int(action.get("quantity", 0)))
+        qty = _coerce_quantity(action.get("quantity", 0))
         reasoning = str(action.get("reasoning", ""))
         error = bool(action.get("error", False))
         first_sym = stock_symbols[0] if stock_symbols else "Stock 1"
@@ -458,13 +503,9 @@ class MarketEnv:
         # --- Last-round outcome feedback (learning loop) ---
         # Feedback reflects the most recent step that produced fills, whether
         # the observation is built mid-round or queried afterwards.
-        prev_trades: list = []
-        if self.trade_history:
-            latest_step = self.trade_history[-1].step
-            prev_trades = [
-                t for t in self.trade_history
-                if t.agent_id == agent_id and t.step == latest_step
-            ]
+        # Served from the fill index: these are exactly this agent's trades
+        # from the most recent step that filled anything.
+        prev_trades: list = self._last_fills_by_agent.get(agent_id, [])
         if prev_trades:
             fills = []
             net_cash = 0.0
@@ -496,6 +537,7 @@ class MarketEnv:
     def step(self) -> Dict[str, Any]:
         """Run one simulation step."""
         self.step_count += 1
+        self._step_fills = {}
 
         # ---------- 0. Event system ----------
         # Global events hit every stock; company-specific events hit one
@@ -678,13 +720,12 @@ class MarketEnv:
                 "matched": matched_volume + player_volume,
             }
 
-        # Update filled quantities from executed trades this step.
-        for trade in self.trade_history:
-            if trade.step == self.step_count and trade.symbol:
-                aid = trade.agent_id
-                sym = trade.symbol
-                if sym in agent_actions.get(aid, {}):
-                    agent_actions[aid][sym]["filled_qty"] += trade.quantity
+        # Update filled quantities from this step's fill index, which
+        # _execute_trade maintains as trades happen. Rescanning
+        # self.trade_history here made every step cost O(total trades so far).
+        for (aid, sym), filled in self._step_fills.items():
+            if sym in agent_actions.get(aid, {}):
+                agent_actions[aid][sym]["filled_qty"] += filled
 
         # Snapshot this round's resolved actions (aggregated for social).
         self._recent_actions = {}
@@ -720,7 +761,7 @@ class MarketEnv:
 
             # Mean reversion: pull toward initial price.
             deviation = (sm.price - sm.initial_price) / max(sm.initial_price, 0.01)
-            mean_reversion = -0.0005 * deviation
+            mean_reversion = -self.config.mean_reversion_strength * deviation
             price_change_ratio += mean_reversion
 
             # Apply event-driven price impact. Global events affect all
@@ -730,8 +771,9 @@ class MarketEnv:
                 price_change_ratio += event_effects.get("price_impact", 0.0)
 
             # Add small noise when no shares are matched.
-            if totals["matched"] == 0:
-                price_change_ratio += self.rng.uniform(-0.003, 0.003)
+            noise = self.config.idle_price_noise
+            if totals["matched"] == 0 and noise > 0:
+                price_change_ratio += self.rng.uniform(-noise, noise)
 
             # Clamp single-step price movement.
             price_change_ratio = max(
@@ -889,7 +931,7 @@ class MarketEnv:
             agent.holdings[symbol] = agent.holdings.get(symbol, 0) - quantity
             cash_change = revenue
 
-        self.trade_history.append(TradeRecord(
+        record = TradeRecord(
             step=self.step_count,
             agent_id=agent_id,
             action=action,
@@ -897,7 +939,16 @@ class MarketEnv:
             price=trade_price,
             cash_change=cash_change,
             name=symbol,
-        ))
+        )
+        self.trade_history.append(record)
+
+        # Keep the fill indexes in sync (see __init__ for why they exist).
+        key = (agent_id, symbol)
+        self._step_fills[key] = self._step_fills.get(key, 0) + quantity
+        if self.step_count != self._last_fill_step:
+            self._last_fill_step = self.step_count
+            self._last_fills_by_agent = {}
+        self._last_fills_by_agent.setdefault(agent_id, []).append(record)
 
     # ------------------------------------------------------------------
     # State snapshot
@@ -942,11 +993,7 @@ class MarketEnv:
                 aid: {
                     "cash": a.cash,
                     "holdings": dict(a.holdings) if isinstance(a.holdings, dict) else {},
-                    "wealth": a.cash + sum(
-                        h * self.stocks[s].price
-                        for s, h in (a.holdings.items() if isinstance(a.holdings, dict) else [])
-                        if s in self.stocks
-                    ),
+                    "wealth": self.agent_wealth(a),
                 }
                 for aid, a in self.agents.items()
             },

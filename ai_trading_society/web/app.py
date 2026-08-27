@@ -19,6 +19,7 @@ from collections import OrderedDict
 try:
     from flask import Flask, jsonify, render_template, request, send_file
     from flask import session as flask_session
+    from werkzeug.exceptions import HTTPException
 except ImportError:
     print("Flask is not installed. Install it with:")
     print("    pip install flask")
@@ -30,7 +31,6 @@ from ai_trading_society.agents.external_ai_agent import (
 )
 from ai_trading_society.agents.player_agent import PlayerAgent
 from ai_trading_society.agents.roster import build_agent_roster, resolve_social_map
-from ai_trading_society.base_agent import BaseAgent
 from ai_trading_society.config import MarketConfig, StockSpec
 from ai_trading_society.config_store import load_config, save_config
 from ai_trading_society.console_utils import (
@@ -198,8 +198,21 @@ def csrf_protect():
 
 @app.errorhandler(Exception)
 def handle_exception(e):
-    """Ensure API errors return JSON instead of HTML error pages."""
+    """Ensure API errors return JSON instead of HTML error pages.
+
+    Aborts raised by Flask (404, 400, ...) keep their status. Genuine bugs
+    are logged with a traceback instead of vanishing into a bare JSON body,
+    and re-raised under --debug so the interactive debugger can show them.
+    """
+    if not isinstance(e, HTTPException):
+        app.logger.exception("Unhandled error on %s %s", request.method, request.path)
+        if app.debug:
+            raise e
+    # HTTPException.code is an int, but any object can reach this handler,
+    # and jsonify(...), <non-int> is a TypeError inside the error path.
     code = getattr(e, "code", 500)
+    if type(code) is not int or not (400 <= code <= 599):
+        code = 500
     return jsonify({"error": str(e)}), code
 
 
@@ -288,7 +301,9 @@ def api_start():
     if seed is not None:
         try:
             seed = int(seed)
-        except ValueError:
+        except (TypeError, ValueError):
+            # int() raises TypeError for lists/dicts/None-likes and
+            # ValueError for junk strings; neither is a 500.
             seed = None
 
     # Parse multi-stock configuration. Each entry: {name, price, hold}.
@@ -390,14 +405,7 @@ def api_start():
     sim.metadata = metadata
 
     # Capture initial wealths (portfolio-level: cash + all holdings * prices).
-    initial_wealths = {}
-    for aid, a in env.agents.items():
-        h = a.holdings if isinstance(a.holdings, dict) else {}
-        wealth = a.cash + sum(
-            h.get(sym, 0) * sm.price
-            for sym, sm in env.stocks.items()
-        )
-        initial_wealths[aid] = wealth
+    initial_wealths = {aid: env.agent_wealth(a) for aid, a in env.agents.items()}
 
     state = _get_session()
     state.clear()
@@ -412,15 +420,15 @@ def api_start():
     state["seed"] = metadata.seed
     # Per-round snapshots for history replay, agent timelines, and reports.
     state["history"] = []
+    # Wealth curve per agent, appended to once per round. Rebuilding these by
+    # walking state["history"] on every step made /api/step cost O(steps^2).
+    state["wealth_curves"] = {aid: [] for aid in env.agents}
 
     # Build agent roster for the frontend.
     roster = []
     for aid, agent in env.agents.items():
         h = agent.holdings if isinstance(agent.holdings, dict) else {}
-        wealth = agent.cash + sum(
-            h.get(sym, 0) * sm.price
-            for sym, sm in env.stocks.items()
-        )
+        wealth = env.agent_wealth(agent)
         roster.append({
             "id": aid,
             "type": agent_type_label(agent),
@@ -509,14 +517,6 @@ def api_step():
     total_buy = step_data.get("total_buy", 0)
     total_sell = step_data.get("total_sell", 0)
 
-    def _agent_wealth(agent: BaseAgent) -> float:
-        """Portfolio wealth: cash + sum(holdings * price) across stocks."""
-        h = agent.holdings if isinstance(agent.holdings, dict) else {}
-        return agent.cash + sum(
-            h.get(sym, 0) * sm.price
-            for sym, sm in env.stocks.items()
-        )
-
     # Build per-agent data.
     # agent_actions is nested: {aid: {sym: {action, requested_qty, filled_qty,
     # reasoning, error}}}. Aggregate per-stock actions into an `actions` list
@@ -528,28 +528,19 @@ def api_step():
             stock_acts, first_symbol=next(iter(env.stocks.keys()), "ATSX")
         )
 
-        wealth = _agent_wealth(agent)
+        wealth = env.agent_wealth(agent)
         init_w = state["initial_wealths"].get(aid, wealth)
         ret_pct = (wealth / init_w - 1) * 100 if init_w > 0 else 0.0
         prev_w = state["prev_wealths"].get(aid, wealth)
         delta = wealth - prev_w
 
-        # Performance grade from this agent's wealth curve so far.
-        # NOTE 1: state["history"] is appended AFTER this block, so it does NOT
-        # yet contain this round — add the live wealth as the latest point.
-        # NOTE 2: each snapshot's "agents" is a LIST of dicts here (unlike
-        # Simulator.state_history where it is a dict keyed by agent id).
-        wealth_curve = []
-        for snap in state.get("history", []):
-            ags = snap.get("agents", [])
-            if isinstance(ags, dict):
-                ags = [ags.get(aid, {})]
-            for entry in ags:
-                if isinstance(entry, dict) and entry.get("id") == aid:
-                    wealth_curve.append(entry.get("wealth", 0))
-                    break
+        # Performance grade from this agent's wealth curve so far. The curve is
+        # kept incrementally (see state["wealth_curves"]) and this round's point
+        # is appended here, before grading, so the grade always includes it.
+        wealth_curve = state.setdefault("wealth_curves", {}).setdefault(aid, [])
+        wealth_curve.append(wealth)
         if init_w > 0:
-            g = grade_wealth_curve(wealth_curve + [wealth], init_w)
+            g = grade_wealth_curve(wealth_curve, init_w)
         else:
             g = {"score": 0, "grade": "D"}
 
@@ -575,7 +566,7 @@ def api_step():
 
     # Update prev_wealths.
     for aid, agent in env.agents.items():
-        state["prev_wealths"][aid] = _agent_wealth(agent)
+        state["prev_wealths"][aid] = env.agent_wealth(agent)
 
     # Per-stock data for the frontend chart.
     stocks_payload = [
@@ -678,20 +669,12 @@ def api_results():
     env: MarketEnv = state["env"]
     initial_price = env.config.initial_price
 
-    def _agent_wealth(agent: BaseAgent) -> float:
-        """Portfolio wealth: cash + sum(holdings * price) across stocks."""
-        h = agent.holdings if isinstance(agent.holdings, dict) else {}
-        return agent.cash + sum(
-            h.get(sym, 0) * sm.price
-            for sym, sm in env.stocks.items()
-        )
-
     agents = list(env.agents.values())
-    ranked = sorted(agents, key=_agent_wealth, reverse=True)
+    ranked = sorted(agents, key=env.agent_wealth, reverse=True)
 
     rankings = []
     for rank, agent in enumerate(ranked, 1):
-        wealth = _agent_wealth(agent)
+        wealth = env.agent_wealth(agent)
         init_w = state["initial_wealths"].get(agent.agent_id, wealth)
         ret = (wealth / init_w - 1) * 100 if init_w > 0 else 0.0
         metrics = sim._compute_agent_metrics(agent.agent_id)
@@ -778,16 +761,10 @@ def api_report_export():
     run_id = state.get("run_id") or (metadata.run_id if metadata else uuid.uuid4().hex[:12])
     seed = state.get("seed")
 
-    def _agent_wealth(agent: BaseAgent) -> float:
-        h = agent.holdings if isinstance(agent.holdings, dict) else {}
-        return agent.cash + sum(
-            h.get(sym, 0) * sm.price for sym, sm in env.stocks.items()
-        )
-
-    ranked = sorted(env.agents.values(), key=_agent_wealth, reverse=True)
+    ranked = sorted(env.agents.values(), key=env.agent_wealth, reverse=True)
     rankings = []
     for rank, agent in enumerate(ranked, 1):
-        wealth = _agent_wealth(agent)
+        wealth = env.agent_wealth(agent)
         init_w = state["initial_wealths"].get(agent.agent_id, wealth)
         metrics = sim._compute_agent_metrics(agent.agent_id)
         rankings.append({
@@ -1067,10 +1044,7 @@ def api_chat():
         return jsonify({"error": "This agent has no AI backend to chat with"}), 400
 
     h = agent.holdings if isinstance(agent.holdings, dict) else {}
-    wealth = agent.cash + sum(
-        h.get(sym, 0) * sm.price
-        for sym, sm in env.stocks.items()
-    )
+    wealth = env.agent_wealth(agent)
     init_w = state["initial_wealths"].get(agent_id, wealth)
     ret = (wealth / init_w - 1) * 100 if init_w > 0 else 0.0
 
@@ -1110,5 +1084,5 @@ if __name__ == "__main__":
     print("  AI TRADING SANDBOX — Web Dashboard")
     print("  Open http://localhost:5000 in your browser")
     print("=" * 50 + "\n")
-    app.run(debug=True, port=5000)
+    app.run(debug=False, port=5000)
 

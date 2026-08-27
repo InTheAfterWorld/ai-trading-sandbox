@@ -231,10 +231,24 @@ class TraitAgent(BaseAgent):
     def _apply_traits_to_decisions(
         self, observation: Dict[str, Any], base_action: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Apply the trait pipeline to every decision in a multi-stock result."""
+        """Apply the trait pipeline to every decision in a multi-stock result.
+
+        Cash is SHARED across every stock, so the loop carries a running
+        budget. Trait overrides that size themselves from the balance (FOMO
+        buys 50% of cash, social herding 30%) would otherwise each see the
+        FULL account and, across N stocks, emit buy intents worth several
+        times what the agent actually holds. MarketEnv clips the overdraft,
+        but only after the stocks it happens to iterate first have swallowed
+        the whole budget -- which turns a personality into an artifact of
+        stock ordering. Deducting as we go keeps the intent affordable and
+        order-independent. Sell proceeds are deliberately NOT credited back:
+        they do not settle until the round executes, and MarketEnv's own
+        cash_budget makes the same assumption.
+        """
         decisions_out = []
         dominant_action = "hold"
         dominant_qty = 0
+        remaining_cash = float(observation.get("my_cash", 0.0) or 0.0)
         for d in base_action["decisions"]:
             if not isinstance(d, dict):
                 continue
@@ -248,6 +262,9 @@ class TraitAgent(BaseAgent):
             error = bool(d.get("error", False))
 
             stock_obs = self._stock_obs(observation, symbol)
+            # Trait sizing must only ever see cash this round has not
+            # already committed to an earlier stock.
+            stock_obs["my_cash"] = max(0.0, remaining_cash)
             action_type, quantity = self._apply_panic(stock_obs, action_type, quantity)
             action_type, quantity = self._apply_fomo(stock_obs, action_type, quantity)
             action_type, quantity = self._apply_loss_aversion(stock_obs, action_type, quantity)
@@ -260,6 +277,13 @@ class TraitAgent(BaseAgent):
             action_type, quantity, social_triggered = self._apply_social(
                 stock_obs, action_type, quantity
             )
+
+            # Reserve the cash this decision commits so later stocks in the
+            # same round size themselves against what is actually left.
+            if action_type == "buy" and quantity > 0:
+                price = float(stock_obs.get("price") or 0.0)
+                if price > 0:
+                    remaining_cash = max(0.0, remaining_cash - quantity * price)
 
             if quantity > dominant_qty:
                 dominant_qty = quantity

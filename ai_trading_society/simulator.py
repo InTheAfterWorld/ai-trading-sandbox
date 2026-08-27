@@ -9,7 +9,6 @@ import csv
 import math
 from typing import Any, Dict, List, Optional
 
-from .base_agent import BaseAgent
 from .console_utils import (
     Colors,
     agent_personality,
@@ -27,6 +26,17 @@ from .run_metadata import RunMetadata, save_run_snapshot
 # Performance evaluation & grading (shared by CLI and web dashboard)
 # ---------------------------------------------------------------------------
 
+# Nominal annualization factor for the Sharpe ratio.
+#
+# One simulation step is NOT a trading day: a run has no calendar and
+# step length is arbitrary. The sqrt(252) factor is kept only so Sharpe
+# values land in the range readers recognise from real-world tables, and
+# it is a constant, so it cannot change the RANKING of agents within a
+# run. Read the result as a unitless risk-adjusted score for comparing
+# agents, never as a real annualized figure.
+_NOMINAL_PERIODS_PER_YEAR = 252
+
+
 def _safe(value: float, default: float = 0.0) -> float:
     """Coerce a numeric value to a finite float (NaN/Inf -> default)."""
     try:
@@ -39,7 +49,8 @@ def _safe(value: float, default: float = 0.0) -> float:
 def evaluate_wealth_curve(wealths: List[float]) -> Dict[str, float]:
     """Compute per-step performance metrics from a wealth curve.
 
-    Returns sharpe (annualized), max_drawdown (fraction 0-1),
+    Returns sharpe (nominally scaled -- see _NOMINAL_PERIODS_PER_YEAR,
+    it is not a real annualized figure), max_drawdown (fraction 0-1),
     volatility (per-step std dev) and win_rate (0-100).
     Non-finite wealth entries are replaced with 0 before computing.
     """
@@ -60,7 +71,10 @@ def evaluate_wealth_curve(wealths: List[float]) -> Dict[str, float]:
     mean_ret = sum(returns) / len(returns)
     var_ret = sum((r - mean_ret) ** 2 for r in returns) / len(returns)
     std_ret = var_ret ** 0.5
-    sharpe = (mean_ret / std_ret) * (252 ** 0.5) if std_ret > 0 else 0.0
+    sharpe = (
+        (mean_ret / std_ret) * (_NOMINAL_PERIODS_PER_YEAR ** 0.5)
+        if std_ret > 0 else 0.0
+    )
 
     peak = wealths[0]
     max_dd = 0.0
@@ -248,17 +262,9 @@ class Simulator:
 
         prev_price = self.env.price
 
-        def _agent_wealth(a: BaseAgent) -> float:
-            """Portfolio wealth: cash + sum(holdings * price) across stocks."""
-            h = a.holdings if isinstance(a.holdings, dict) else {}
-            return a.cash + sum(
-                h.get(sym, 0) * sm.price
-                for sym, sm in self.env.stocks.items()
-            )
-
         # Capture initial wealths before any trading begins.
         for aid, a in self.env.agents.items():
-            self._initial_wealths[aid] = _agent_wealth(a)
+            self._initial_wealths[aid] = self.env.agent_wealth(a)
 
         for i in range(steps):
             state = self.env.step()
@@ -278,7 +284,7 @@ class Simulator:
 
             # Update prev_wealths for next round's delta display.
             for aid, a in self.env.agents.items():
-                self._prev_wealths[aid] = _agent_wealth(a)
+                self._prev_wealths[aid] = self.env.agent_wealth(a)
 
             prev_price = state["price"]
 
@@ -722,10 +728,7 @@ class Simulator:
                 reasoning = stock_acts.get("reasoning", "")
 
             h = agent.holdings if isinstance(agent.holdings, dict) else {}
-            wealth = agent.cash + sum(
-                h.get(sym, 0) * sm.price
-                for sym, sm in self.env.stocks.items()
-            )
+            wealth = self.env.agent_wealth(agent)
             type_label = agent_type_label(agent)
 
             # Return percentage from initial wealth
@@ -864,52 +867,22 @@ class Simulator:
     # ------------------------------------------------------------------
 
     def _compute_agent_metrics(self, agent_id: str) -> Dict[str, float]:
-        """Compute performance metrics for a single agent from state history."""
-        wealths: List[float] = []
-        for state in self.state_history:
-            agent_data = state.get("agents", {}).get(agent_id, {})
-            wealths.append(agent_data.get("wealth", 0))
+        """Compute performance metrics for a single agent from state history.
 
-        if len(wealths) < 2:
-            return {"sharpe": 0.0, "max_drawdown": 0.0, "volatility": 0.0, "win_rate": 0.0}
+        Thin wrapper over :func:`evaluate_wealth_curve` so the two code paths
+        (CLI report and web dashboard) can never drift apart.
 
-        # Per-step returns
-        returns: List[float] = []
-        for i in range(1, len(wealths)):
-            if wealths[i - 1] > 0:
-                returns.append((wealths[i] - wealths[i - 1]) / wealths[i - 1])
-            else:
-                returns.append(0.0)
-
-        # Annualized Sharpe with zero risk-free return per simulation step.
-        mean_ret = sum(returns) / len(returns) if returns else 0.0
-        var_ret = sum((r - mean_ret) ** 2 for r in returns) / len(returns) if returns else 0.0
-        std_ret = var_ret ** 0.5
-        sharpe = (mean_ret / std_ret) * (252 ** 0.5) if std_ret > 0 else 0.0
-
-        # Max drawdown
-        peak = wealths[0]
-        max_dd = 0.0
-        for w in wealths:
-            if w > peak:
-                peak = w
-            dd = (peak - w) / peak if peak > 0 else 0.0
-            if dd > max_dd:
-                max_dd = dd
-
-        # Volatility (std of returns)
-        volatility = std_ret
-
-        # Win rate (percentage of positive-return steps)
-        wins = sum(1 for r in returns if r > 0)
-        win_rate = wins / len(returns) if returns else 0.0
-
-        return {
-            "sharpe": sharpe,
-            "max_drawdown": max_dd,
-            "volatility": volatility,
-            "win_rate": win_rate,
-        }
+        NOTE the unit difference: ``evaluate_wealth_curve`` reports win_rate on
+        a 0-100 scale, while this method's callers expect the 0-1 fraction they
+        multiply by 100 themselves. Convert once, here.
+        """
+        wealths = [
+            state.get("agents", {}).get(agent_id, {}).get("wealth", 0)
+            for state in self.state_history
+        ]
+        metrics = evaluate_wealth_curve(wealths)
+        metrics["win_rate"] = metrics["win_rate"] / 100.0
+        return metrics
 
     # ------------------------------------------------------------------
     # Reporting
@@ -968,18 +941,10 @@ class Simulator:
         print(header)
         print(f"  {'-'*4}  {'-'*22}  {'-'*10}  {'-'*10}  {'-'*10}  {'-'*8}")
 
-        def _agent_wealth(a: BaseAgent) -> float:
-            """Portfolio wealth: cash + sum(holdings * price) across stocks."""
-            h = a.holdings if isinstance(a.holdings, dict) else {}
-            return a.cash + sum(
-                h.get(sym, 0) * sm.price
-                for sym, sm in env.stocks.items()
-            )
-
-        ranked = sorted(agents, key=_agent_wealth, reverse=True)
+        ranked = sorted(agents, key=env.agent_wealth, reverse=True)
 
         for rank, agent in enumerate(ranked, 1):
-            wealth = _agent_wealth(agent)
+            wealth = env.agent_wealth(agent)
             # Use the exact initial wealth captured before trading began.
             # Estimating it from FINAL holdings at the initial price would
             # misstate returns (e.g. an agent that bought high and sold low

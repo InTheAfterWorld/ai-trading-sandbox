@@ -407,8 +407,51 @@ def generate_report_html(
     return doc
 
 
-def save_report(html_text: str, run_id: str, reports_dir: str = "runs/reports") -> str:
-    """Write the report file and return its path. run_id is sanitized."""
+# Exported reports are disposable snapshots and nothing ever removed them,
+# so a long-lived server grew runs/reports without bound. Keep the most
+# recent N; pass max_reports=0 from a caller that wants to keep everything.
+MAX_REPORTS = 50
+
+
+def _prune_reports(reports_dir: str, max_reports: int) -> None:
+    """Delete the oldest exported reports beyond ``max_reports``.
+
+    Best-effort and deliberately narrow: only ``.html`` files directly
+    inside ``reports_dir`` (the directory this module owns) are considered,
+    and any filesystem error is ignored rather than failing an export.
+    """
+    if max_reports <= 0:
+        return
+    try:
+        entries = [
+            (os.path.getmtime(os.path.join(reports_dir, name)), name)
+            for name in os.listdir(reports_dir)
+            if name.endswith(".html")
+            and os.path.isfile(os.path.join(reports_dir, name))
+        ]
+    except OSError:
+        return
+    if len(entries) <= max_reports:
+        return
+    entries.sort(reverse=True)  # newest first
+    for _, name in entries[max_reports:]:
+        try:
+            os.remove(os.path.join(reports_dir, name))
+        except OSError:
+            pass
+
+
+def save_report(
+    html_text: str,
+    run_id: str,
+    reports_dir: str = "runs/reports",
+    max_reports: int = MAX_REPORTS,
+) -> str:
+    """Write the report file and return its path. run_id is sanitized.
+
+    Older reports beyond ``max_reports`` are pruned after the write, so
+    the just-saved report is always kept.
+    """
     import re as _re
 
     if not _re.fullmatch(r"[A-Za-z0-9_\-]+", run_id or ""):
@@ -417,4 +460,5 @@ def save_report(html_text: str, run_id: str, reports_dir: str = "runs/reports") 
     path = os.path.join(reports_dir, f"{run_id}.html")
     with open(path, "w", encoding="utf-8") as f:
         f.write(html_text)
+    _prune_reports(reports_dir, max_reports)
     return path

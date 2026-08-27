@@ -49,6 +49,18 @@ class MarketConfig:
     max_price_change_ratio: float = 0.10
     """Maximum price change ratio per step to prevent extreme jumps."""
 
+    mean_reversion_strength: float = 0.0005
+    """Pull back toward a stock's initial price each step, as a fraction
+    of its current deviation. 0 disables mean reversion."""
+
+    idle_price_noise: float = 0.003
+    """Half-width of the uniform random drift applied to a stock in a step
+    where nothing matched, so an untraded market still moves. 0 disables."""
+
+    event_impact_scale: float = 0.3
+    """Fraction of an active event's headline price/sentiment impact
+    applied per step; the full impact is spread across its duration."""
+
     min_price: float = 0.01
     """Lower price bound."""
 
@@ -123,6 +135,9 @@ class MarketConfig:
             "initial_price": self.initial_price,
             "price_sensitivity": self.price_sensitivity,
             "max_price_change_ratio": self.max_price_change_ratio,
+            "mean_reversion_strength": self.mean_reversion_strength,
+            "idle_price_noise": self.idle_price_noise,
+            "event_impact_scale": self.event_impact_scale,
             "min_price": self.min_price,
             "max_price": self.max_price,
             "stocks": [
