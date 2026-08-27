@@ -279,8 +279,11 @@ docs/user_facing_text.md  # All user-visible copy (editable)
 
 ## Contributing
 
-Fork → feature branch → pull request. Code style is enforced by `ruff`; run
-`pytest` before submitting.
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for
+the development setup, code quality gates (ruff / mypy / pytest), and commit
+message conventions. By participating you agree to abide by our
+[Code of Conduct](CODE_OF_CONDUCT.md). Security vulnerabilities are handled
+privately — see [SECURITY.md](SECURITY.md).
 
 ## License
 

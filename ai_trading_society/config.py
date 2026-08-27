@@ -158,14 +158,12 @@ class MarketConfig:
                 if isinstance(s, StockSpec):
                     stocks.append(s)
                 elif isinstance(s, dict):
+                    price = s.get("initial_price", s.get("price", 100.0))
+                    hold = s.get("initial_holdings", s.get("hold", 0))
                     stocks.append(StockSpec(
                         name=str(s.get("name") or s.get("symbol") or "Stock"),
-                        initial_price=float(
-                            s.get("initial_price", s.get("price", 100.0))
-                        ),
-                        initial_holdings=int(
-                            s.get("initial_holdings", s.get("hold", 0))
-                        ),
+                        initial_price=float(price) if price is not None else 100.0,
+                        initial_holdings=int(hold) if hold is not None else 0,
                         sector=str(s.get("sector") or ""),
                         blurb=str(s.get("blurb") or ""),
                     ))

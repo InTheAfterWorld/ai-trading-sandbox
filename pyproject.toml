@@ -7,7 +7,7 @@ name = "ai-trading-sandbox"
 version = "0.2.0"
 description = "A multi-agent stock market sandbox for experimenting with AI trading behavior."
 readme = "README.md"
-license = {text = "MIT"}
+license = {file = "LICENSE"}
 requires-python = ">=3.10"
 authors = [{name = "AI TRADING SANDBOX Contributors"}]
 keywords = ["simulation", "multi-agent", "stock-market", "ai", "sandbox"]
@@ -28,7 +28,7 @@ viz = ["matplotlib>=3.7"]
 config = ["pyyaml>=6.0"]
 ai = ["openai>=1.0", "anthropic>=0.18", "google-generativeai>=0.3"]
 web = ["flask>=3.0"]
-dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.1", "mypy>=1.0"]
+dev = ["pytest>=7.0", "pytest-cov>=4.0", "ruff>=0.1", "mypy>=1.0", "flask>=3.0"]
 all = ["matplotlib>=3.7", "pyyaml>=6.0", "openai>=1.0", "anthropic>=0.18", "google-generativeai>=0.3", "flask>=3.0"]
 
 [project.scripts]
@@ -40,6 +40,13 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# report_export.py embeds a static HTML/CSS template: many lines are
+# intentionally long to keep the styling readable as-is.
+"ai_trading_society/report_export.py" = ["E501"]
+"tests/*" = ["E501"]
+"tests/**/*" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

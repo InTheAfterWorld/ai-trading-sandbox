@@ -103,7 +103,8 @@ def _line_chart_svg(
     pad_l, pad_r, pad_t, pad_b = 64, 16, 14, 26
     w = width - pad_l - pad_r
     h = height - pad_t - pad_b
-    lo, hi = min(all_pts), max(all_pts)
+    lo: float = min(all_pts)
+    hi: float = max(all_pts)
     if hi == lo:
         hi = lo + 1
     span = hi - lo

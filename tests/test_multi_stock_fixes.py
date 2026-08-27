@@ -7,13 +7,11 @@ Validates:
 4. Web API configuration without homepage start price.
 """
 
-import pytest
-from ai_trading_society.config import MarketConfig, StockSpec
-from ai_trading_society.config_store import _normalize_stocks, save_config, load_config
-from ai_trading_society.market_env import MarketEnv
 from ai_trading_society.agents.external_ai_agent import ExternalAIAgent
 from ai_trading_society.agents.player_agent import PlayerAgent
-from ai_trading_society.agents.roster import build_agent_roster
+from ai_trading_society.config import MarketConfig, StockSpec
+from ai_trading_society.config_store import _normalize_stocks
+from ai_trading_society.market_env import MarketEnv
 
 
 def test_stock_spec_and_config_without_symbol():

@@ -30,6 +30,7 @@ from ai_trading_society.agents.external_ai_agent import (
 )
 from ai_trading_society.agents.player_agent import PlayerAgent
 from ai_trading_society.agents.roster import build_agent_roster, resolve_social_map
+from ai_trading_society.base_agent import BaseAgent
 from ai_trading_society.config import MarketConfig, StockSpec
 from ai_trading_society.config_store import load_config, save_config
 from ai_trading_society.console_utils import (
@@ -487,7 +488,7 @@ def api_step():
     if "sim" not in state:
         return jsonify({"error": "No active simulation"}), 400
 
-    env = state["env"]
+    env: MarketEnv = state["env"]
     sim = state["sim"]
     total_steps = state["steps"]
 
@@ -508,7 +509,7 @@ def api_step():
     total_buy = step_data.get("total_buy", 0)
     total_sell = step_data.get("total_sell", 0)
 
-    def _agent_wealth(agent) -> float:
+    def _agent_wealth(agent: BaseAgent) -> float:
         """Portfolio wealth: cash + sum(holdings * price) across stocks."""
         h = agent.holdings if isinstance(agent.holdings, dict) else {}
         return agent.cash + sum(
@@ -674,10 +675,10 @@ def api_results():
         return jsonify({"error": "No active simulation"}), 400
 
     sim = state["sim"]
-    env = state["env"]
+    env: MarketEnv = state["env"]
     initial_price = env.config.initial_price
 
-    def _agent_wealth(agent) -> float:
+    def _agent_wealth(agent: BaseAgent) -> float:
         """Portfolio wealth: cash + sum(holdings * price) across stocks."""
         h = agent.holdings if isinstance(agent.holdings, dict) else {}
         return agent.cash + sum(
@@ -771,13 +772,13 @@ def api_report_export():
     if "env" not in state:
         return jsonify({"error": "No active simulation"}), 400
 
-    env = state["env"]
+    env: MarketEnv = state["env"]
     sim = state["sim"]
     metadata = getattr(sim, "metadata", None)
     run_id = state.get("run_id") or (metadata.run_id if metadata else uuid.uuid4().hex[:12])
     seed = state.get("seed")
 
-    def _agent_wealth(agent) -> float:
+    def _agent_wealth(agent: BaseAgent) -> float:
         h = agent.holdings if isinstance(agent.holdings, dict) else {}
         return agent.cash + sum(
             h.get(sym, 0) * sm.price for sym, sm in env.stocks.items()
@@ -978,7 +979,9 @@ def api_god_config():
         "max_price_change_ratio": env.config.max_price_change_ratio,
         "event_multiplier": env.config.event_probability_multiplier,
         "sentiment_drift": getattr(env, "_sentiment_drift", 0.0),
-        "social_influence": getattr(env, "_social_influence", getattr(env.config, "social_influence", 0.0)),
+        "social_influence": getattr(
+            env, "_social_influence", getattr(env.config, "social_influence", 0.0)
+        ),
     })
 
 

@@ -114,7 +114,7 @@ class ExternalAIAgent(BaseAgent):
         self,
         agent_id: str,
         cash: float = 10000.0,
-        holdings: int = 0,
+        holdings: int | Dict[str, float] = 0,
         api_provider: str = "openai",
         model: str = "gpt-4o",
         api_key: Optional[str] = None,
@@ -544,7 +544,7 @@ class ExternalAIAgent(BaseAgent):
                 "openai package not installed. Install with: pip install openai"
             )
 
-        client_kwargs = {"api_key": self.api_key}
+        client_kwargs: Dict[str, Any] = {"api_key": self.api_key}
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
         # Bound the HTTP request so a slow / unresponsive provider cannot

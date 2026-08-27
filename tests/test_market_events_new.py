@@ -4,7 +4,6 @@ from ai_trading_society.market_events import (
     EVENT_TEMPLATES,
     EventManager,
     EventType,
-    MarketEvent,
 )
 
 

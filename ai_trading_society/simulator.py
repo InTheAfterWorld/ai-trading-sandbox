@@ -9,6 +9,7 @@ import csv
 import math
 from typing import Any, Dict, List, Optional
 
+from .base_agent import BaseAgent
 from .console_utils import (
     Colors,
     agent_personality,
@@ -21,7 +22,6 @@ from .console_utils import (
 )
 from .market_env import MarketEnv
 from .run_metadata import RunMetadata, save_run_snapshot
-
 
 # ---------------------------------------------------------------------------
 # Performance evaluation & grading (shared by CLI and web dashboard)
@@ -248,7 +248,7 @@ class Simulator:
 
         prev_price = self.env.price
 
-        def _agent_wealth(a) -> float:
+        def _agent_wealth(a: BaseAgent) -> float:
             """Portfolio wealth: cash + sum(holdings * price) across stocks."""
             h = a.holdings if isinstance(a.holdings, dict) else {}
             return a.cash + sum(
@@ -748,7 +748,7 @@ class Simulator:
                 "S": Colors.GREEN, "A": Colors.GREEN, "B": Colors.YELLOW,
                 "C": Colors.ORANGE if hasattr(Colors, "ORANGE") else "",
                 "D": Colors.RED,
-            }.get(g["grade"], "")
+            }.get(str(g["grade"]), "")
             grade_str = colorize(f"[{g['grade']}·{g['score']}]", grade_color)
 
             # Wealth delta from previous round
@@ -968,7 +968,7 @@ class Simulator:
         print(header)
         print(f"  {'-'*4}  {'-'*22}  {'-'*10}  {'-'*10}  {'-'*10}  {'-'*8}")
 
-        def _agent_wealth(a) -> float:
+        def _agent_wealth(a: BaseAgent) -> float:
             """Portfolio wealth: cash + sum(holdings * price) across stocks."""
             h = a.holdings if isinstance(a.holdings, dict) else {}
             return a.cash + sum(

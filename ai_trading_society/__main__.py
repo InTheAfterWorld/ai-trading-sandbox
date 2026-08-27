@@ -54,7 +54,9 @@ def run_society_mode(
                 continue
             stock_specs.append(StockSpec(
                 name=name,
-                initial_price=float(s.get("price", s.get("initial_price", cfg.get("price", 100.0)))),
+                initial_price=float(
+                    s.get("price", s.get("initial_price", cfg.get("price", 100.0)))
+                ),
                 initial_holdings=int(s.get("hold", s.get("initial_holdings", cfg.get("hold", 0)))),
                 sector=str(s.get("sector") or ""),
                 blurb=str(s.get("blurb") or s.get("description") or ""),

@@ -122,7 +122,7 @@ class MarketEnv:
             agent_rng = self.rng
             if isinstance(self.rng, random.Random):
                 digest = zlib.crc32(str(a.agent_id).encode("utf-8"))
-                agent_rng = random.Random((self._base_seed << 32) ^ digest ^ index)
+                agent_rng = random.Random(((self._base_seed or 0) << 32) ^ digest ^ index)
             try:
                 setattr(a, "rng", agent_rng)
             except Exception:
@@ -195,7 +195,7 @@ class MarketEnv:
         self._sentiment_drift: float = 0.0
 
         # --- Reusable thread pool for parallel agent action collection ---
-        self._pool: Optional[ThreadPoolExecutor] = None
+        # (initialized at the top of __init__)
 
     def _get_pool(self) -> ThreadPoolExecutor:
         """Get or create the thread pool executor for agent action collection."""
@@ -469,16 +469,16 @@ class MarketEnv:
             fills = []
             net_cash = 0.0
             for t in prev_trades:
-                sm = self.stocks.get(t.name)
+                stk = self.stocks.get(t.name)
                 move = 0.0
-                if sm is not None and t.price > 0:
-                    move = round((sm.price / t.price - 1) * 100, 2)
+                if stk is not None and t.price > 0:
+                    move = round((stk.price / t.price - 1) * 100, 2)
                 fills.append({
                     "action": t.action,
                     "quantity": t.quantity,
                     "symbol": t.name,
                     "fill_price": round(t.price, 2),
-                    "current_price": round(sm.price, 2) if sm else None,
+                    "current_price": round(stk.price, 2) if stk else None,
                     "move_since_fill_pct": move,
                 })
                 net_cash += t.cash_change
@@ -584,6 +584,9 @@ class MarketEnv:
                     }
                     for sym in stock_symbols
                 ]
+
+            if decisions is None:
+                continue
 
             for d in decisions:
                 sym = d["symbol"]

@@ -1,8 +1,11 @@
 """Human player agent that reads actions from the MarketEnv buffer."""
 
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from ..base_agent import BaseAgent
+
+if TYPE_CHECKING:
+    from ..market_env import MarketEnv
 
 
 class PlayerAgent(BaseAgent):
@@ -12,9 +15,14 @@ class PlayerAgent(BaseAgent):
     This agent reads that buffered action during act().
     """
 
-    def __init__(self, agent_id: str = "Player (You)", cash: float = 10000.0, holdings: int = 20):
+    def __init__(
+        self,
+        agent_id: str = "Player (You)",
+        cash: float = 10000.0,
+        holdings: int | Dict[str, float] = 20,
+    ):
         super().__init__(agent_id=agent_id, cash=cash, holdings=holdings)
-        self._env = None  # Set by MarketEnv or web_app after construction
+        self._env: Optional["MarketEnv"] = None  # Set by MarketEnv or web_app after construction
         # MarketEnv routes player orders through an implicit market maker.
         self.is_player = True
 
@@ -22,7 +30,11 @@ class PlayerAgent(BaseAgent):
         """Return decisions for all stocks, reading buffered player actions."""
         # Get the list of stock names from the observation.
         stocks = observation.get("stocks", [])
-        all_symbols = [s.get("name") or s.get("symbol") for s in stocks if s.get("name") or s.get("symbol")]
+        all_symbols = [
+            s.get("name") or s.get("symbol")
+            for s in stocks
+            if s.get("name") or s.get("symbol")
+        ]
 
         if self._env is not None:
             pending = self._env.pop_player_actions()

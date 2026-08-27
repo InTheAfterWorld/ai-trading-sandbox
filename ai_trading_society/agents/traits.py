@@ -38,7 +38,7 @@ class TraitAgent(BaseAgent):
     # Temporary balances stored via the cash/holdings setters while
     # super().__init__() runs (before base_agent exists).
     _cash_tmp: float
-    _holdings_tmp: int
+    _holdings_tmp: Any
 
     def __init__(
         self,
