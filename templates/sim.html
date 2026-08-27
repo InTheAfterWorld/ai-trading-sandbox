@@ -397,12 +397,18 @@ td.reason{font-size:11px;color:var(--text-dim);font-style:italic;line-height:1.4
 
 /* ---------- Waiting window / thinking states ---------- */
 .wait-window{
-  position:fixed;top:76px;left:50%;transform:translateX(-50%) translateY(-8px);z-index:250;
+  position:fixed;top:76px;left:50%;transform:translateX(-50%) translateY(-8px);z-index:260;
   display:flex;align-items:center;gap:13px;padding:13px 20px;
   background:var(--card);color:var(--text);border:1px solid var(--border-hover);border-radius:12px;
   box-shadow:var(--shadow-lg);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;
 }
-.wait-window.show{opacity:1;transform:translateX(-50%) translateY(0);}
+.wait-window.show{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto;}
+.ww-stop{
+  font-size:11px;font-weight:700;padding:4px 10px;border-radius:6px;cursor:pointer;
+  background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.25);
+  display:none;white-space:nowrap;
+}
+.wait-window.show.auto-running .ww-stop{display:inline-block;}
 /* Full-screen transparent click-blocker shown while AI is thinking. */
 .think-overlay{
   position:fixed;inset:0;z-index:240;display:none;
@@ -724,7 +730,7 @@ body.dark .guide-tag{background:#f0f3f9;}
 
 /* ---------- Modals: replay / agent timeline / shortcuts / tutorial ---------- */
 .modal-wide{width:760px;max-width:95vw;max-height:88vh;display:flex;flex-direction:column;}
-.modal-scroll{flex:1;overflow-y:auto;font-size:12px;line-height:1.5;color:var(--text-dim);}
+.modal-scroll{flex:1;min-height:0;overflow-y:auto;font-size:12px;line-height:1.5;color:var(--text-dim);}
 .modal-scroll b{color:var(--text);}
 .tl-summary-bar{
   display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:9px 12px;
@@ -936,6 +942,7 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
     <div class="ww-title">AI agents are thinking…</div>
     <div class="ww-sub" id="waitSub">Waiting for responses</div>
   </div>
+  <button class="ww-stop" onclick="stopAuto()" title="Stop auto-play after this round">⏸ Stop Auto</button>
 </div>
 
 <!-- Modal: confirm end -->
@@ -964,9 +971,9 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
 
 <!-- Modal: results -->
 <div class="modal-overlay" id="resultsModal">
-  <div class="modal-card" style="width:520px;max-width:92vw;padding:20px;">
-    <div class="modal-title" style="font-size:16px;margin-bottom:10px;">🏆 Simulation Results</div>
-    <div class="modal-body" id="resultsBody" style="font-size:12px;line-height:1.5;margin-bottom:14px;"></div>
+  <div class="modal-card modal-wide" style="padding:16px;">
+    <div class="modal-title" style="font-size:14px;margin-bottom:8px;">🏆 Simulation Results</div>
+    <div class="modal-body modal-scroll" id="resultsBody" style="font-size:11px;line-height:1.4;margin-bottom:10px;"></div>
     <div class="modal-actions">
       <button class="btn btn-sm" onclick="closeModal('resultsModal')">Close</button>
       <button class="btn btn-sm" onclick="restartSim()">↻ Restart</button>
@@ -1216,22 +1223,46 @@ function toastContainer(){return document.getElementById('toastContainer');}
 /* ---- Thinking / waiting states ---- */
 function setThinking(on){
   sim.thinking=on;
+  const autoActive=!!sim.autoTimer;
   document.getElementById('waitWindow').classList.toggle('show',on);
+  document.getElementById('waitWindow').classList.toggle('auto-running',on&&autoActive);
   document.getElementById('waitSub').textContent=`Round ${sim.round+1} · waiting for AI responses`;
   document.getElementById('agentsThinking').hidden=!on;
   document.getElementById('thinkingBar').hidden=!on;
   document.getElementById('agentsCard').classList.toggle('agents-thinking',on);
-  // Block all controls while AI is thinking — not just Next Round.
-  ['btnStep','btnAuto','btnEnd','speedSelect'].forEach(id=>{
+  // Block core controls while AI is thinking — but keep Pause and the speed
+  // selector usable while auto-play runs so the user can always stop/slow it.
+  ['btnStep','btnEnd'].forEach(id=>{
     const el=document.getElementById(id);
     if(el)el.disabled=on;
   });
+  const autoBtn=document.getElementById('btnAuto');
+  if(autoBtn)autoBtn.disabled=on&&!autoActive;
+  const spd=document.getElementById('speedSelect');
+  if(spd)spd.disabled=on&&!autoActive;
   const btn=document.getElementById('btnStep');
   btn.disabled=on||!sim.running;
   btn.innerHTML=on?'<span class="btn-spinner"></span> Thinking…':'Next Round ▶';
-  // A full-screen transparent overlay prevents clicks anywhere else.
+  // The full-screen click-blocker is only needed for manual play; during
+  // auto-play it would swallow clicks on the Pause button.
   const ov=document.getElementById('thinkOverlay');
-  if(ov)ov.classList.toggle('show',on);
+  if(ov)ov.classList.toggle('show',on&&!autoActive);
+}
+
+function stopAuto(){
+  if(sim.autoTimer){clearInterval(sim.autoTimer);sim.autoTimer=null;}
+  const btn=document.getElementById('btnAuto');
+  if(btn){btn.textContent='▶ Auto';}
+  // Stopped mid-round: fall back to manual-mode thinking state until the
+  // in-flight round finishes.
+  if(sim.thinking){
+    if(btn)btn.disabled=true;
+    const spd=document.getElementById('speedSelect');
+    if(spd)spd.disabled=true;
+    const ov=document.getElementById('thinkOverlay');
+    if(ov)ov.classList.add('show');
+  }
+  document.getElementById('waitWindow').classList.remove('auto-running');
 }
 
 /* ---- Start ---- */
@@ -1436,10 +1467,27 @@ function toggleAuto(){
   if(sim.autoTimer){
     clearInterval(sim.autoTimer);sim.autoTimer=null;
     document.getElementById('btnAuto').textContent='▶ Auto';
+    // Paused mid-round: restore the manual-mode thinking state until the
+    // in-flight round completes.
+    if(sim.thinking){
+      document.getElementById('btnAuto').disabled=true;
+      document.getElementById('speedSelect').disabled=true;
+      const ov=document.getElementById('thinkOverlay');
+      if(ov)ov.classList.add('show');
+    }
   }else{
     sim.autoTimer=setInterval(()=>runStep(),sim.autoInterval);
     document.getElementById('btnAuto').textContent='⏸ Pause';
+    // Started mid-round: unblock Pause/speed and drop the click-blocker so
+    // the user stays in control while agents think.
+    if(sim.thinking){
+      document.getElementById('btnAuto').disabled=false;
+      document.getElementById('speedSelect').disabled=false;
+      const ov=document.getElementById('thinkOverlay');
+      if(ov)ov.classList.remove('show');
+    }
   }
+  document.getElementById('waitWindow').classList.toggle('auto-running',sim.thinking&&!!sim.autoTimer);
 }
 function onSpeedChange(){
   const sel=document.getElementById('speedSelect');
@@ -2629,55 +2677,55 @@ async function showResults(){
     const chgCls=chg>=0?'pos':'neg';
 
     // Final price chart
-    html+='<div style="margin-bottom:10px;">';
-    html+='<div style="font-size:12px;font-weight:700;margin-bottom:6px;">📉 Final Price Chart</div>';
-    html+='<div style="position:relative;height:120px;"><canvas id="finalChart"></canvas></div>';
+    html+='<div style="margin-bottom:8px;">';
+    html+='<div style="font-size:12px;font-weight:700;margin-bottom:4px;">📉 Final Price Chart</div>';
+    html+='<div style="position:relative;height:104px;"><canvas id="finalChart"></canvas></div>';
     html+='</div>';
 
     // Wealth comparison chart (multi-agent wealth curves from wealth_history).
     if(data.wealth_history&&Object.keys(data.wealth_history).length>0){
-      html+='<div style="margin-bottom:10px;">';
-      html+='<div style="font-size:12px;font-weight:700;margin-bottom:6px;">💰 Wealth Comparison</div>';
-      html+='<div style="position:relative;height:160px;"><canvas id="wealthChart"></canvas></div>';
+      html+='<div style="margin-bottom:8px;">';
+      html+='<div style="font-size:12px;font-weight:700;margin-bottom:4px;">💰 Wealth Comparison</div>';
+      html+='<div style="position:relative;height:132px;"><canvas id="wealthChart"></canvas></div>';
       html+='</div>';
     }
 
-    html+='<div style="margin-bottom:10px;">';
-    html+='<div style="font-size:12px;font-weight:700;margin-bottom:6px;">📈 Market Overview</div>';
+    html+='<div style="margin-bottom:8px;">';
+    html+='<div style="font-size:12px;font-weight:700;margin-bottom:4px;">📈 Market Overview</div>';
     html+='<div class="results-grid" style="gap:6px;">';
-    html+=`<div class="res-item" style="padding:8px;"><div class="res-label">Initial</div><div class="res-val" style="font-size:13px;">$${(ps.initial||0).toFixed(2)}</div></div>`;
-    html+=`<div class="res-item" style="padding:8px;"><div class="res-label">Final</div><div class="res-val" style="font-size:13px;">$${(ps.final||0).toFixed(2)}</div></div>`;
-    html+=`<div class="res-item" style="padding:8px;"><div class="res-label">Change</div><div class="res-val ${chgCls}" style="font-size:13px;">${chg>=0?'+':''}${chg.toFixed(2)}%</div></div>`;
-    html+=`<div class="res-item" style="padding:8px;"><div class="res-label">Range</div><div class="res-val" style="font-size:13px;">$${(ps.min||0).toFixed(0)} – $${(ps.max||0).toFixed(0)}</div></div>`;
+    html+=`<div class="res-item" style="padding:5px 9px;"><div class="res-label">Initial</div><div class="res-val" style="font-size:12.5px;">$${(ps.initial||0).toFixed(2)}</div></div>`;
+    html+=`<div class="res-item" style="padding:5px 9px;"><div class="res-label">Final</div><div class="res-val" style="font-size:12.5px;">$${(ps.final||0).toFixed(2)}</div></div>`;
+    html+=`<div class="res-item" style="padding:5px 9px;"><div class="res-label">Change</div><div class="res-val ${chgCls}" style="font-size:12.5px;">${chg>=0?'+':''}${chg.toFixed(2)}%</div></div>`;
+    html+=`<div class="res-item" style="padding:5px 9px;"><div class="res-label">Range</div><div class="res-val" style="font-size:12.5px;">$${(ps.min||0).toFixed(0)} – $${(ps.max||0).toFixed(0)}</div></div>`;
     html+='</div></div>';
 
     const ts=data.trade_summary||{};
-    html+='<div style="margin-bottom:10px;">';
-    html+='<div style="font-size:12px;font-weight:700;margin-bottom:6px;">📊 Trade Activity</div>';
+    html+='<div style="margin-bottom:8px;">';
+    html+='<div style="font-size:12px;font-weight:700;margin-bottom:4px;">📊 Trade Activity</div>';
     html+='<div class="results-grid" style="gap:6px;">';
-    html+=`<div class="res-item" style="padding:8px;"><div class="res-label">Total Trades</div><div class="res-val" style="font-size:13px;">${ts.total||0}</div></div>`;
-    html+=`<div class="res-item" style="padding:8px;"><div class="res-label">Buys / Sells</div><div class="res-val" style="font-size:13px;"><span class="pos">${ts.buys||0}</span> / <span class="neg">${ts.sells||0}</span></div></div>`;
-    html+=`<div class="res-item" style="padding:8px;"><div class="res-label">Avg Volume</div><div class="res-val" style="font-size:13px;">${(ts.avg_volume||0).toFixed(1)}</div></div>`;
+    html+=`<div class="res-item" style="padding:5px 9px;"><div class="res-label">Total Trades</div><div class="res-val" style="font-size:12.5px;">${ts.total||0}</div></div>`;
+    html+=`<div class="res-item" style="padding:5px 9px;"><div class="res-label">Buys / Sells</div><div class="res-val" style="font-size:12.5px;"><span class="pos">${ts.buys||0}</span> / <span class="neg">${ts.sells||0}</span></div></div>`;
+    html+=`<div class="res-item" style="padding:5px 9px;"><div class="res-label">Avg Volume</div><div class="res-val" style="font-size:12.5px;">${(ts.avg_volume||0).toFixed(1)}</div></div>`;
     html+='</div></div>';
 
     const ranks=data.rankings||[];
     if(ranks.length>0){
-      html+='<div style="margin-bottom:6px;">';
-      html+='<div style="font-size:12px;font-weight:700;margin-bottom:6px;">🏆 Final Leaderboard</div>';
-      html+='<table style="font-size:11px;"><thead><tr><th>#</th><th>Agent</th><th class="num">Wealth</th><th class="num">Return</th><th class="num" title="Sharpe ratio: average return per unit of risk (std dev). Higher = better risk-adjusted performance.">Sharpe</th><th class="num" title="Volatility: standard deviation of per-round wealth returns. Higher = swingier performance.">Vol</th><th class="num" title="Max drawdown: largest peak-to-trough wealth decline, as % of peak.">MaxDD</th><th class="num" title="Win rate: share of rounds where the agent\'s wealth increased.">Win%</th></tr></thead><tbody>';
+      html+='<div style="margin-bottom:4px;">';
+      html+='<div style="font-size:12px;font-weight:700;margin-bottom:4px;">🏆 Final Leaderboard</div>';
+      html+='<table style="font-size:10.5px;"><thead><tr><th>#</th><th>Agent</th><th class="num">Wealth</th><th class="num">Return</th><th class="num" title="Sharpe ratio: average return per unit of risk (std dev). Higher = better risk-adjusted performance.">Sharpe</th><th class="num" title="Volatility: standard deviation of per-round wealth returns. Higher = swingier performance.">Vol</th><th class="num" title="Max drawdown: largest peak-to-trough wealth decline, as % of peak.">MaxDD</th><th class="num" title="Win rate: share of rounds where the agent\'s wealth increased.">Win%</th></tr></thead><tbody>';
       ranks.forEach(r=>{
         const ret=r.return_pct||0;
         const retCls=ret>=0?'pos':'neg';
         const retStr=ret>=0?'+'+ret.toFixed(2):ret.toFixed(2);
         html+=`<tr>
-          <td style="font-weight:700;padding:4px 6px;">${r.rank}</td>
-          <td style="padding:4px 6px;"><span class="agent-dot" style="background:${sim.agentColors[r.id]||'#888'};color:${sim.agentColors[r.id]||'#888'};display:inline-block;margin-right:4px;"></span>${escapeHtml(r.id)}</td>
-          <td class="num" style="padding:4px 6px;">$${(r.wealth||0).toFixed(0)}</td>
-          <td class="num ${retCls}" style="padding:4px 6px;">${retStr}%</td>
-          <td class="num muted" style="padding:4px 6px;">${(r.sharpe||0).toFixed(2)}</td>
-          <td class="num muted" style="padding:4px 6px;">${(r.volatility||0).toFixed(1)}%</td>
-          <td class="num neg" style="padding:4px 6px;">${(r.max_drawdown||0).toFixed(1)}%</td>
-          <td class="num muted" style="padding:4px 6px;">${(r.win_rate||0).toFixed(0)}%</td>
+          <td style="font-weight:700;padding:3px 5px;">${r.rank}</td>
+          <td style="padding:3px 5px;"><span class="agent-dot" style="background:${sim.agentColors[r.id]||'#888'};color:${sim.agentColors[r.id]||'#888'};display:inline-block;margin-right:4px;"></span>${escapeHtml(r.id)}</td>
+          <td class="num" style="padding:3px 5px;">$${(r.wealth||0).toFixed(0)}</td>
+          <td class="num ${retCls}" style="padding:3px 5px;">${retStr}%</td>
+          <td class="num muted" style="padding:3px 5px;">${(r.sharpe||0).toFixed(2)}</td>
+          <td class="num muted" style="padding:3px 5px;">${(r.volatility||0).toFixed(1)}%</td>
+          <td class="num neg" style="padding:3px 5px;">${(r.max_drawdown||0).toFixed(1)}%</td>
+          <td class="num muted" style="padding:3px 5px;">${(r.win_rate||0).toFixed(0)}%</td>
         </tr>`;
       });
       html+='</tbody></table></div>';
@@ -2700,7 +2748,8 @@ async function showResults(){
             backgroundColor:'rgba(99,91,255,.12)',
             borderWidth:2.5,
             pointRadius:0,
-            tension:.3,
+            pointHitRadius:8,
+            cubicInterpolationMode:'monotone',
             fill:true
           }]
         },
@@ -2708,8 +2757,8 @@ async function showResults(){
           responsive:true,maintainAspectRatio:false,
           plugins:{legend:{display:false},tooltip:{backgroundColor:'#1d2335',borderColor:'#3a4a6b',borderWidth:1,titleColor:'#e2e8f0',bodyColor:'#7c8aa5'}},
           scales:{
-            x:{grid:{color:'rgba(42,50,69,.5)'},ticks:{color:'#64748b',font:{size:10}}},
-            y:{grid:{color:'rgba(42,50,69,.5)'},ticks:{color:'#64748b',font:{size:10}}}
+            x:{grid:{color:'rgba(42,50,69,.5)'},ticks:{color:'#64748b',font:{size:10},maxRotation:0,autoSkipPadding:14}},
+            y:{grace:'10%',grid:{color:'rgba(42,50,69,.5)'},ticks:{color:'#64748b',font:{size:10}}}
           },
           interaction:{mode:'index',intersect:false}
         }
@@ -2722,9 +2771,11 @@ async function showResults(){
       const wh=data.wealth_history;
       const agentIds=Object.keys(wh);
       if(agentIds.length>0){
-        // Build a shared step axis from the longest series.
-        const maxLen=Math.max(...agentIds.map(id=>(wh[id]||[]).length));
-        const labels=Array.from({length:maxLen},(_,i)=>i);
+        // Build a shared step axis from the longest series, using the real
+        // round numbers (snapshots start at step 1; the price chart's index 0
+        // is the pre-trading initial price, so both charts stay aligned).
+        const longest=agentIds.reduce((a,b)=>((wh[b]||[]).length>=(wh[a]||[]).length?b:a),agentIds[0]);
+        const labels=(wh[longest]||[]).map((p,i)=>(p&&typeof p.step==='number')?p.step:i+1);
         const palette=['#a78bfa','#60a5fa','#22c55e','#eab308','#ef4444','#f97316','#06b6d4','#ec4899'];
         const datasets=agentIds.map((id,i)=>({
           label:id,
@@ -2733,7 +2784,8 @@ async function showResults(){
           backgroundColor:'transparent',
           borderWidth:2,
           pointRadius:0,
-          tension:.3,
+          pointHitRadius:8,
+          cubicInterpolationMode:'monotone',
         }));
         new Chart(wealthCtx.getContext('2d'),{
           type:'line',
@@ -2745,8 +2797,8 @@ async function showResults(){
               tooltip:{backgroundColor:'#1d2335',borderColor:'#3a4a6b',borderWidth:1,titleColor:'#e2e8f0',bodyColor:'#7c8aa5'}
             },
             scales:{
-              x:{grid:{color:'rgba(42,50,69,.5)'},ticks:{color:'#64748b',font:{size:10}}},
-              y:{grid:{color:'rgba(42,50,69,.5)'},ticks:{color:'#64748b',font:{size:10},callback:v=>'$'+Number(v).toFixed(0)}}
+              x:{grid:{color:'rgba(42,50,69,.5)'},ticks:{color:'#64748b',font:{size:10},maxRotation:0,autoSkipPadding:14}},
+              y:{grace:'10%',grid:{color:'rgba(42,50,69,.5)'},ticks:{color:'#64748b',font:{size:10},callback:v=>'$'+Number(v).toFixed(0)}}
             },
             interaction:{mode:'index',intersect:false}
           }

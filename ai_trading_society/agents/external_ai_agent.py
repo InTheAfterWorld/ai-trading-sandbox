@@ -887,6 +887,34 @@ class ExternalAIAgent(BaseAgent):
 
         return best_decisions, best_legacy, saw_invalid
 
+    # Reasoning-model thought blocks: <think>...</think> (DeepSeek-R1, QwQ)
+    # and <|begin_of_thought|>...<|end_of_thought|>. Some providers strip the
+    # opening tag and leave an orphan closing tag, so everything before the
+    # last </think> is reasoning.
+    _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL | re.IGNORECASE)
+    _THOUGHT_TOKENS_RE = re.compile(
+        r"<\|begin_of_thought\|>.*?<\|end_of_thought\|>\s*", re.DOTALL
+    )
+    _THINK_UNCLOSED_RE = re.compile(r"<think>.*", re.DOTALL | re.IGNORECASE)
+    _THINK_ORPHAN_CLOSE_RE = re.compile(r"^.*</think>\s*", re.DOTALL | re.IGNORECASE)
+
+    def _strip_reasoning(self, response: str) -> str:
+        """
+        Remove reasoning-model thought blocks from a response.
+
+        Complete <think>...</think> blocks are dropped; an unclosed <think>
+        (response truncated mid-thought) drops everything after it; an orphan
+        </think> keeps only the text after the last closing tag. Returns the
+        original response when nothing recognizable was stripped.
+        """
+        cleaned = self._THINK_BLOCK_RE.sub("", response)
+        cleaned = self._THOUGHT_TOKENS_RE.sub("", cleaned)
+        cleaned = self._THINK_UNCLOSED_RE.sub("", cleaned)
+        cleaned = self._THINK_ORPHAN_CLOSE_RE.sub("", cleaned, count=1)
+        if cleaned.strip():
+            return cleaned
+        return response
+
     def _parse_response(self, response: str) -> Dict[str, Any]:
         """
         Extract a JSON action object from the AI response.
@@ -896,14 +924,19 @@ class ExternalAIAgent(BaseAgent):
           "reasoning"}, ...]}``
         - Legacy single-stock: ``{"action", "quantity", "reasoning"}``
 
-        Handles pure JSON, markdown code blocks, and JSON embedded in text.
-        When several valid objects appear, the LAST one wins.
+        Handles pure JSON, markdown code blocks, JSON embedded in text, and
+        reasoning-model thought blocks (<think>...</think>). When several
+        valid objects appear, the LAST one wins.
 
         For multi-stock format, all valid decision entries are collected.
         For legacy format, a single action object is returned.
         """
         if not isinstance(response, str) or not response.strip():
             raise ValueError("AI response was empty or not text")
+
+        # Reasoning models spend their output budget on thinking; strip the
+        # thought blocks so only the final answer is scanned.
+        response = self._strip_reasoning(response)
 
         # Pass 1: raw response. Pass 2+: progressively repaired variants
         # (code fences, trailing commas, Python literals, single quotes).
@@ -965,6 +998,101 @@ class ExternalAIAgent(BaseAgent):
             f"{response[:200]!r}"
         )
 
+    def _retry_with_escalation(
+        self,
+        observation: Dict[str, Any],
+        prompt: str,
+        response: str,
+        parse_error: ValueError,
+    ) -> tuple[Dict[str, Any], str]:
+        """
+        Re-ask the model after an unparseable response, escalating strategies.
+
+        Attempt 1 keeps the historical behavior: show the model its own
+        invalid output and demand pure JSON. Attempt 2 uses a minimal prompt
+        (stock data only, no memory context) with explicit anti-thinking
+        constraints. Attempt 3 offers a fill-in JSON template that leaves
+        almost no room for format errors.
+
+        Returns (parsed_result, last_response) on the first success. Raises
+        the last parse error when every attempt fails.
+        """
+        stocks = observation.get("stocks", [])
+        if stocks:
+            stock_lines = "\n".join(
+                f"- {s.get('name') or s.get('symbol') or 'Stock'}: "
+                f"price ${s.get('price', 0):.2f}, "
+                f"holdings {s.get('my_holdings', 0)}"
+                for s in stocks
+            )
+            template = (
+                '{"decisions": ['
+                + ", ".join(
+                    f'{{"name": "{s.get("name") or s.get("symbol") or "Stock"}", '
+                    '"action": "buy|sell|hold", "quantity": <integer>, '
+                    '"reasoning": "<short>"}'
+                    for s in stocks
+                )
+                + "]}"
+            )
+        else:
+            stock_lines = (
+                f"- Current price: ${observation.get('price', 0):.2f}, "
+                f"holdings {observation.get('my_holdings', 0)}"
+            )
+            template = (
+                '{"action": "buy|sell|hold", "quantity": <integer>, '
+                '"reasoning": "<short>"}'
+            )
+
+        repair_instructions = [
+            (
+                "Your previous response was NOT valid JSON and could not be "
+                "parsed. Respond again, corrected: output ONLY one raw JSON "
+                "object with a 'decisions' array covering every stock, each "
+                "entry having 'name', 'action' (buy/sell/hold), an integer "
+                "'quantity', and short 'reasoning'. No markdown fences, no "
+                "commentary before or after."
+            ),
+            (
+                "Do NOT include any reasoning, thinking, or explanation. Do "
+                "NOT use thinking tags. Start your response with '{' and end "
+                "it with '}'. Output ONLY the JSON object. Decide on these "
+                f"stocks:\n{stock_lines}"
+            ),
+            (
+                "Your previous responses were not parseable JSON. Copy this "
+                "template EXACTLY, replacing buy|sell|hold with one action "
+                "and <integer>/<short> with your values. Output nothing "
+                f"else, no thinking:\n{template}"
+            ),
+        ]
+
+        last_error = parse_error
+        for attempt, instruction in enumerate(repair_instructions):
+            if attempt == 0:
+                retry_messages = [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt},
+                    {"role": "assistant", "content": response},
+                    {"role": "user", "content": instruction},
+                ]
+            else:
+                # Fresh, minimal prompts for attempts 2/3: repeating the
+                # original prompt and the failed responses only biases the
+                # model toward repeating its mistake.
+                retry_messages = [
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": instruction},
+                ]
+            response2 = self._call_ai_api("", messages=retry_messages)
+            try:
+                result = self._parse_response(response2)
+                return result, response2
+            except ValueError as exc:
+                last_error = exc
+        raise last_error
+
     # ------------------------------------------------------------------
     # Core interface
     # ------------------------------------------------------------------
@@ -987,27 +1115,16 @@ class ExternalAIAgent(BaseAgent):
         response = self._call_ai_api(prompt)
         try:
             result = self._parse_response(response)
-        except ValueError:
-            # Corrective retry: show the model its own invalid output and
-            # demand pure JSON. Recovers most remaining format mistakes at
-            # the cost of one extra API call.
-            repair_instruction = (
-                "Your previous response was NOT valid JSON and could not be "
-                "parsed. Respond again, corrected: output ONLY one raw JSON "
-                "object with a 'decisions' array covering every stock, each "
-                "entry having 'name', 'action' (buy/sell/hold), an integer "
-                "'quantity', and short 'reasoning'. No markdown fences, no "
-                "commentary before or after."
+        except ValueError as parse_error:
+            # Corrective retries with escalating strategies: (1) show the
+            # model its own invalid output and demand pure JSON, (2) retry
+            # with a minimal prompt free of memory context that may distract
+            # a weak or reasoning-heavy model, (3) offer a fill-in template
+            # that leaves almost no room for format errors. Each attempt
+            # costs one extra API call.
+            result, response = self._retry_with_escalation(
+                observation, prompt, response, parse_error
             )
-            retry_messages = [
-                {"role": "system", "content": self.system_prompt},
-                {"role": "user", "content": prompt},
-                {"role": "assistant", "content": response},
-                {"role": "user", "content": repair_instruction},
-            ]
-            response2 = self._call_ai_api("", messages=retry_messages)
-            result = self._parse_response(response2)
-            response = response2
 
         # Store conversation turn for memory.
         if self.enable_memory:
