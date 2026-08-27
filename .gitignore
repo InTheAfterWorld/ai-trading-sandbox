@@ -26,6 +26,8 @@ user_config.json.bak
 # Output files
 *.csv
 *.png
+!logo.png
+!demo.png
 *.jpg
 *.svg
 *.log
