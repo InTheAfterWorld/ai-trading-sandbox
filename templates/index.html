@@ -166,6 +166,12 @@ input[type="range"]:focus{outline:none;}
 }
 .configure-btn{width:100%;background:transparent;color:var(--purple);border:1px solid var(--border-hover);border-radius:var(--radius);padding:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;}
 .configure-btn:hover{background:rgba(99,91,255,.08);border-color:var(--purple);}
+.cfg-io{display:flex;gap:8px;margin-top:10px;}
+.cfg-io button{flex:1;background:transparent;color:var(--text-dim);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font:600 11.5px inherit;cursor:pointer;transition:border-color .2s,color .2s;}
+.cfg-io button:hover{border-color:var(--purple);color:var(--purple);}
+.cfg-io-status{font-size:11px;margin-top:6px;text-align:center;color:var(--text-dim);min-height:14px;}
+.cfg-io-status.ok{color:var(--green);}
+.cfg-io-status.bad{color:var(--red);}
 .trader-config{display:none;position:fixed;inset:0;z-index:5;background:rgba(10,37,64,.45);padding:24px;overflow:auto;}
 .trader-config.open{display:block;}
 .config-dialog{max-width:960px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);padding:26px;}
@@ -244,6 +250,12 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
         <div class="group-label"><span class="gicon">KEY</span>Trader APIs</div>
         <button class="configure-btn" onclick="openConfig()">Configure API connections</button>
         <div id="configuredSummary" style="font-size:11px;color:var(--text-dim);margin-top:10px;text-align:center;"></div>
+        <div class="cfg-io">
+          <button type="button" onclick="document.getElementById('cfgUploadInput').click()">⬆ Upload config file</button>
+          <button type="button" onclick="downloadConfig()">⬇ Download current</button>
+        </div>
+        <input type="file" id="cfgUploadInput" accept=".json,application/json" style="display:none" onchange="uploadConfigFile(this)">
+        <div class="cfg-io-status" id="cfgIoStatus"></div>
       </div>
 
       <div class="field-group">
@@ -596,6 +608,54 @@ function renderStockSummaryFromConfig(){
 function showError(msg){
   const el=document.getElementById('homeError');
   el.textContent=msg;el.style.display='block';
+}
+/* ---- Import / export the whole user_config ---- */
+function cfgIoStatus(msg,kind){
+  const el=document.getElementById('cfgIoStatus');
+  if(!el)return;
+  el.textContent=msg||'';
+  el.className='cfg-io-status'+(kind?(' '+kind):'');
+}
+async function uploadConfigFile(input){
+  const file=input.files&&input.files[0];
+  input.value='';                       // let the same file be re-picked later
+  if(!file)return;
+  cfgIoStatus('Uploading '+file.name+'…');
+  try{
+    const fd=new FormData();
+    fd.append('file',file);
+    const r=await fetch('/api/config/upload',{method:'POST',body:fd});
+    let data;
+    try{data=await r.json();}catch(e){data={};}
+    if(!r.ok||!data.ok){
+      cfgIoStatus(data.error||('Upload failed (HTTP '+r.status+').'),'bad');
+      return;
+    }
+    // Adopt the server's normalized config everywhere the homepage reads it.
+    localStorage.setItem('ats_config',JSON.stringify(data.config));
+    await loadConfig();
+    const s=data.summary||{};
+    const keyNote=(s.traders_with_keys!=null&&s.traders)
+      ? ` (${s.traders_with_keys}/${s.traders} with a key)` : '';
+    cfgIoStatus(`Loaded ${s.traders||0} trader(s)${keyNote}, ${s.stocks||0} stock(s).`,'ok');
+  }catch(e){
+    cfgIoStatus(e.message||'Upload failed.','bad');
+  }
+}
+async function downloadConfig(){
+  try{
+    const r=await fetch('/api/config');
+    const d=await r.json();
+    const blob=new Blob([JSON.stringify(d.config,null,2)],{type:'application/json'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download='user_config.json';
+    document.body.appendChild(a);a.click();a.remove();
+    URL.revokeObjectURL(a.href);
+    cfgIoStatus('Downloaded user_config.json','ok');
+  }catch(e){
+    cfgIoStatus('Could not read the current config.','bad');
+  }
 }
 /* ---- Theme toggle ---- */
 function applyThemeButton(){

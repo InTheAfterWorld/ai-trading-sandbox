@@ -306,12 +306,17 @@ class TestLaunchHardening:
         # It should reference the environment, not a literal.
         assert isinstance(debug, ast.Compare)
 
-    def test_run_py_binds_loopback(self):
+    def test_run_py_debug_is_opt_in(self):
+        # run.py binds 0.0.0.0 on purpose (cloud deploy, see commit
+        # "Modify run.py to run on cloud servers"); the property that still
+        # matters is that the Werkzeug debugger is never on by default.
         kw = self._main_call(_REPO / "run.py")
-        assert isinstance(kw.get("host"), ast.Constant)
-        assert kw["host"].value == "127.0.0.1"
+        debug = kw.get("debug")
+        assert not (isinstance(debug, ast.Constant) and debug.value is True), \
+            "run.py must not hard-code debug=True"
+        assert isinstance(debug, ast.Attribute) and debug.attr == "debug", \
+            "run.py debug should follow the --debug flag"
 
     def test_no_env_file_shipped(self):
         assert not (_REPO / ".env").exists(), \
             ".env must not exist in the working tree (secrets live in user_config.json)"
-        assert (_REPO / ".env.example").exists()

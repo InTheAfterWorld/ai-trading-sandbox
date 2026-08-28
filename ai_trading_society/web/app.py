@@ -10,6 +10,7 @@ Run:
 Then open http://localhost:5000 in your browser.
 """
 
+import json
 import os
 import re
 import sys
@@ -321,6 +322,85 @@ def api_save_config():
     if _redact_config_responses():
         saved = redact_config(saved)
     return jsonify({"ok": True, "config": saved})
+
+
+# A real user_config.json is a few KB; this is a generous ceiling that still
+# rejects an accidental multi-megabyte upload before it is parsed.
+_MAX_CONFIG_UPLOAD_BYTES = 256 * 1024
+
+
+def _config_summary(cfg: dict) -> dict:
+    """A short, safe-to-display recap of what an uploaded config resolved to."""
+    traders = cfg.get("traders", []) or []
+    return {
+        "steps": cfg.get("steps"),
+        "traders": len(traders),
+        "traders_with_keys": sum(1 for t in traders if t.get("api_key")),
+        "stocks": len(cfg.get("stocks", []) or []),
+        "player_participates": cfg.get("player_participates"),
+    }
+
+
+@app.route("/api/config/upload", methods=["POST"])
+def api_upload_config():
+    """Replace the saved configuration with an uploaded user_config.json.
+
+    Accepts a multipart file part (``file`` / ``config`` / the first file)
+    or a raw JSON request body. The upload goes through the same
+    ``save_config`` normalisation as a homepage edit -- unknown keys are
+    dropped, out-of-range numbers clamped -- so a slightly-off file cannot
+    break anything, and the previous config is kept as user_config.json.bak.
+
+    A blanked trader ``api_key`` in the upload keeps whatever key is already
+    stored for that trader name; the response ``summary`` reports how many
+    traders ended up with a key so the outcome is visible.
+    """
+    raw = b""
+    if request.files:
+        storage = (
+            request.files.get("file")
+            or request.files.get("config")
+            or next(iter(request.files.values()), None)
+        )
+        if storage is not None:
+            raw = storage.read()
+    if not raw:
+        raw = request.get_data(cache=False) or b""
+
+    if not raw.strip():
+        return jsonify({"ok": False, "error": "No file or JSON body received."}), 400
+    if len(raw) > _MAX_CONFIG_UPLOAD_BYTES:
+        limit_kb = _MAX_CONFIG_UPLOAD_BYTES // 1024
+        return jsonify({
+            "ok": False,
+            "error": f"Config file is too large (limit {limit_kb} KB).",
+        }), 413
+
+    try:
+        parsed = json.loads(raw.decode("utf-8-sig"))
+    except UnicodeDecodeError:
+        return jsonify({"ok": False, "error": "File is not valid UTF-8 text."}), 400
+    except json.JSONDecodeError as exc:
+        return jsonify({
+            "ok": False,
+            "error": (
+                f"Not valid JSON: {exc.msg} "
+                f"(line {exc.lineno}, column {exc.colno})."
+            ),
+        }), 400
+
+    if not isinstance(parsed, dict):
+        return jsonify({
+            "ok": False,
+            "error": "Expected a JSON object (the contents of user_config.json).",
+        }), 400
+
+    saved = save_config(parsed)
+    return jsonify({
+        "ok": True,
+        "config": redact_config(saved) if _redact_config_responses() else saved,
+        "summary": _config_summary(saved),
+    })
 
 
 @app.route("/api/start", methods=["POST"])
