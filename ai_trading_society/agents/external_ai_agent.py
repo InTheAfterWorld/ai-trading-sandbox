@@ -1389,7 +1389,10 @@ class ExternalAIAgent(BaseAgent):
             mood = extras.get("mood")
             if isinstance(mood, dict):
                 result["mood"] = mood
-            lesson = str(extras.get("lesson", "")).strip()
+            # Must actually be text: a JSON null would otherwise become the
+            # string "None" and be filed as a lesson forever.
+            raw_lesson = extras.get("lesson")
+            lesson = raw_lesson.strip() if isinstance(raw_lesson, str) else ""
             if lesson:
                 result["lesson"] = lesson
             return result

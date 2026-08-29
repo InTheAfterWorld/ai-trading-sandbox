@@ -218,6 +218,22 @@ class TestLessonsAndPlans:
         agent._record_position_plans(closed, {"decisions": []})
         assert "Alpha" not in agent._position_plans
 
+    @pytest.mark.parametrize("bad", ["null", "42", "true", "[]", "{}"])
+    def test_non_text_lesson_is_dropped(self, bad):
+        """A JSON null must not become the literal lesson "None".
+
+        Lessons persist for the whole run and replay in every later
+        prompt, so junk here would pollute the agent's memory forever.
+        """
+        agent = _agent()
+        parsed = agent._parse_response(
+            '{"decisions": [{"name": "Alpha", "action": "hold", "quantity": 0}],'
+            f' "lesson": {bad}}}'
+        )
+        assert "lesson" not in parsed
+        agent._record_lesson(parsed)
+        assert agent._lessons == []
+
     def test_optional_fields_absent_by_default(self):
         parsed = _agent()._parse_response(
             '{"decisions": [{"name": "Alpha", "action": "hold", "quantity": 0}]}'
