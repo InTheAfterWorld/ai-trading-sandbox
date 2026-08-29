@@ -63,17 +63,28 @@ can emerge from interactions between autonomous AI agents.
   order book, **sector tag, and company blurb** fed to the agents' prompts.
 - **Synthetic history** — each stock gets a seed-reproducible random walk
   pre-history so agents analyze real trends from the very first round.
-- **Personality traits** — panic, greed, FOMO, stubbornness, loss aversion,
-  overconfidence, regret avoidance; individually or as presets.
+- **Personality** — each trader gets a written character (8 presets) in its
+  prompt. Nothing overrides what the model decides, so an agent's action
+  always matches the reasoning shown next to it.
+- **Deep personality mode** — an optional switch (off by default) that gives
+  each trader tunable sensitivity dials and a mood that shifts with results
+  (confidence / stress / frustration), and adds more context to the prompt:
+  how the trader ranks against the others, how the floor feels, what rivals
+  said, and which moves it was and wasn't positioned for.
 - **Human player** — join as a trader or spectate; trade from the web dashboard.
 - **Market events** — 41 templates across 10 categories (global events hit every
   stock; company-specific ones hit one).
-- **Agent memory** — short-term decision summaries plus long-term memory of key events.
+- **Agent memory** — short-term decision summaries, long-term memory of key
+  events, and (in deep mode) one-line lessons a trader writes for itself.
 - **Learning feedback** — each agent sees its last round's fills and their
   price moves since execution to learn from its own outcomes.
 - **Grading** — every agent gets a blended 0-100 score + S/A/B/C/D grade from
   return, Sharpe, drawdown, and win rate.
-- **Social influence** — idol/friends/enemies relationships drive herding and fading.
+- **Social relationships** — idol / friends / enemies decide which other
+  traders an agent pays attention to: their recent moves, and in deep mode
+  their stated reasoning.
+- **Import / export config** — download the current setup as a JSON file
+  from the homepage, or upload one to load it.
 - **God Mode** — inject events and tune market parameters live.
 - **Replay & reports** — per-round snapshots, event timeline replay, agent decision
   logs, one-click self-contained HTML report with shareable link.
@@ -83,13 +94,8 @@ can emerge from interactions between autonomous AI agents.
 Each trader has
 
 - Personality
-    - greed
-    - panic
-    - FOMO
-    - stubbornness
-    - loss aversion
-    - overconfidence
-    - regret avoidance
+    - a written character (one of 8 presets, or your own text)
+    - in deep mode: sensitivity dials and a mood that changes over time
 
 - Memory
 
@@ -140,6 +146,9 @@ Feedback & Memory
 Next Round
 ```
 
+The AI's decision is final. Personality and mood only shape the prompt the
+model sees — they never rewrite the trade it chooses.
+
 ## Emergent Behavior
 
 The sandbox does not just tell each agent what to do. Instead,
@@ -155,7 +164,8 @@ Examples include:
 - **Overreaction** — agents respond disproportionately to new information.
 - **Behavioral persistence** — previous experiences affect future decisions.
 
-These behaviors are to be explored.
+None of these are scripted — they come from each trader's own judgment, not
+from rules in the sandbox. These behaviors are to be explored.
 
 
 ## Quick Start
@@ -167,6 +177,11 @@ python run.py
 
 Open http://localhost:5000, click **Configure API connections** to add at least
 one trader API key, optionally configure stocks, then launch.
+
+> [!NOTE]
+> The dashboard has no login and hands your saved API keys to anyone who can
+> reach it. `run.py` listens on all network interfaces and reads a `PORT`
+> variable, so keep it on your own machine or a trusted network.
 
 ### CLI
 
@@ -191,15 +206,18 @@ Saved to `user_config.json`, shared by the web UI and CLI:
 
 | Key | Meaning |
 | --- | --- |
-| `traders` | Per-trader provider / model / API key / personality. |
+| `traders` | Per-trader provider / model / API key / personality, plus optional `persona` text, `trait_notes`, and `dials` (used in deep mode). |
 | `stocks` | `{name, price, hold, sector?, blurb?}` list — multiple stocks supported. |
 | `cash`, `hold`, `fee`, `slip` | Starting capital and transaction costs. |
-| `social_influence` | Strength of herding behavior (0–1). |
+| `deep_persona` | Turn on deep personality mode: dials, mood, richer prompts (default false). |
+| `social_influence` | Kept for older configs; no longer changes behavior. |
 | `player_participates` | Whether you join the market as a trader (default true). |
 | `parallel_agents` | Concurrent per-round agent actions (default true). |
 
-In `MarketConfig`, the synthetic pre-history length is `history_backfill_steps`
-(default 30; set 0 to disable). Stock `sector`/`blurb` strings go straight into
+In `MarketConfig`, deep mode has two tuning knobs: `mood_max_step` (how far a
+mood can move in one round, default 3) and `mood_intensity` (how strongly the
+fallback mood formula reacts, default 1). The synthetic pre-history length is
+`history_backfill_steps` (default 30; set 0 to disable). Stock `sector`/`blurb` strings go straight into
 each agent's observation and prompt. Set `parallel_agents=False` to collect
 agent decisions strictly one-by-one.
 
@@ -207,7 +225,8 @@ agent decisions strictly one-by-one.
 
 `balanced` · `aggressive` · `conservative` · `panicky` · `greedy` ·
 `fomo_driven` · `stubborn` · `emotional` — assigned per trader in the web UI,
-or via `create_personality_agent(base_agent, personality=...)`.
+or via `create_personality_agent(base_agent, personality=..., deep=False)`.
+Pass `deep=True` for the mood + dials layer.
 
 ## As a Library
 
@@ -235,6 +254,9 @@ sim.report()                      # rankings, Sharpe, drawdown
 sim.export_csv("trades.csv")
 ```
 
+Pass `deep_persona=True` to both `MarketConfig` and `build_agent_roster` for
+the full mood + dials layer.
+
 Every run saves a snapshot (metadata, config, state history) to `runs/<run_id>/`;
 reload one with `load_run_snapshot()`.
 
@@ -242,15 +264,15 @@ reload one with `load_run_snapshot()`.
 
 | Symbol | Description |
 | --- | --- |
-| `MarketConfig(...)` | Market parameters: fees, slippage, events, social influence, seed. |
+| `MarketConfig(...)` | Market parameters: fees, slippage, events, `deep_persona` and mood knobs, seed. |
 | `StockSpec(name, initial_price, initial_holdings, sector="", blurb="")` | One stock; optional sector tag & company blurb. |
 | `MarketEnv(config, agents, seed=None)` | Engine: observations, matching, pricing, player buffer, last-round feedback. |
 | `Simulator(env)` / `.run(steps, interactive=False)` | Run loop; returns state history. |
 | `.report()` / `.export_csv(filepath)` | Final report / trade CSV. |
 | `build_agent_roster(..., include_player=True)` | Build `(agents, player_agent)`. |
 | `ExternalAIAgent(agent_id, api_provider, model, api_key)` | LLM-backed trader with short/long-term memory. |
-| `TraitAgent(base_agent, panic=0, greed=0, ...)` | Personality wrapper. |
-| `create_personality_agent(base, personality="balanced")` | Named preset. |
+| `TraitAgent(base_agent, personality_name="custom", deep=False, ...)` | Personality + mood wrapper; passes the base agent's decision through untouched. |
+| `create_personality_agent(base, personality="balanced", deep=False)` | Named preset; `deep=True` adds mood + dials. |
 | `PlayerAgent(agent_id, cash, holdings)` | Human trader (absent when spectating). |
 | `EventManager` / `EVENT_TEMPLATES` | 41 event templates across 10 categories. |
 | `load_run_snapshot(run_id)` | Reload a saved run. |
