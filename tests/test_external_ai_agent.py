@@ -1,6 +1,14 @@
 """Tests for ExternalAIAgent."""
 
-from ai_trading_society.agents.external_ai_agent import ExternalAIAgent
+from ai_trading_society.agents.external_ai_agent import (
+    _REASONING_DETAIL_DEEP,
+    _REASONING_DETAIL_SIMPLE,
+    ExternalAIAgent,
+)
+from ai_trading_society.agents.traits import (
+    _PERSONALITY_DISPOSITIONS,
+    create_personality_agent,
+)
 
 
 class TestActWithoutApiKey:
@@ -262,3 +270,35 @@ class TestPromptBuilding:
         }
         prompt = agent._build_prompt(obs)
         assert "Sentiment" not in prompt
+
+
+class TestSystemPromptDepth:
+    """The persona and reasoning-length rule baked into the system prompt."""
+
+    def test_default_prompt_asks_for_short_reasoning(self):
+        prompt = ExternalAIAgent._default_system_prompt()
+        assert _REASONING_DETAIL_SIMPLE in prompt
+        assert _REASONING_DETAIL_DEEP not in prompt
+
+    def test_deep_prompt_asks_for_longer_reasoning(self):
+        prompt = ExternalAIAgent._default_system_prompt(deep=True)
+        assert _REASONING_DETAIL_DEEP in prompt
+        assert _REASONING_DETAIL_SIMPLE not in prompt
+
+    def test_both_depths_keep_the_json_contract(self):
+        for deep in (False, True):
+            prompt = ExternalAIAgent._default_system_prompt(deep=deep)
+            assert "OUTPUT FORMAT" in prompt
+            assert '{"decisions": [{"name": "<stock name>"' in prompt
+
+    def test_persona_prepends_and_keeps_the_rules(self):
+        base = ExternalAIAgent("r", api_key="k", enable_memory=False)
+        agent = create_personality_agent(base, "panicky", deep=True)
+        prompt = base.system_prompt
+        assert prompt.startswith(agent.disposition)
+        assert "OUTPUT FORMAT" in prompt
+
+    def test_preset_disposition_reaches_the_prompt(self):
+        base = ExternalAIAgent("r", api_key="k", enable_memory=False)
+        create_personality_agent(base, "aggressive", deep=True)
+        assert _PERSONALITY_DISPOSITIONS["aggressive"]["full"] in base.system_prompt

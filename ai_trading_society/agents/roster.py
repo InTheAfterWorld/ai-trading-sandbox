@@ -164,6 +164,9 @@ def build_agent_roster(
     holdings: int = 20,
     stocks: Optional[List[StockSpec]] = None,
     include_player: bool = True,
+    deep_persona: bool = False,
+    mood_max_step: float = 3.0,
+    mood_intensity: float = 1.0,
 ) -> Tuple[List[BaseAgent], Optional[PlayerAgent]]:
     """
     Build and return the list of participating agents for a market simulation run.
@@ -173,6 +176,9 @@ def build_agent_roster(
     include_player : bool, optional
         When False the human player does NOT join as a trader: no
         PlayerAgent is created (spectator mode). Default True.
+    deep_persona : bool, optional
+        Give each trader the full personality paragraph and ask for longer,
+        in-character reasoning. Default False (the lean prompt).
     provider : str
         API provider name (e.g. "openai", "google", "openrouter", etc.).
     model : str
@@ -236,7 +242,16 @@ def build_agent_roster(
             api_key=trader_key or None,
             base_url=trader.get("base_url") or None,
         )
-        trait_agent = create_personality_agent(base, personality=personality)
+        trait_agent = create_personality_agent(
+            base,
+            personality=personality,
+            deep=deep_persona,
+            dials=trader.get("dials") if isinstance(trader.get("dials"), dict) else None,
+            trait_notes=str(trader.get("trait_notes") or ""),
+            persona=str(trader.get("persona") or ""),
+            mood_max_step=mood_max_step,
+            mood_intensity=mood_intensity,
+        )
         agents.append(trait_agent)
 
     player_agent: Optional[PlayerAgent] = None

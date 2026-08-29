@@ -172,6 +172,21 @@ input[type="range"]:focus{outline:none;}
 .cfg-io-status{font-size:11px;margin-top:6px;text-align:center;color:var(--text-dim);min-height:14px;}
 .cfg-io-status.ok{color:var(--green);}
 .cfg-io-status.bad{color:var(--red);}
+.deep-toggle{display:flex;gap:9px;align-items:flex-start;margin-top:12px;cursor:pointer;}
+.deep-toggle input{margin-top:2px;flex-shrink:0;cursor:pointer;}
+.deep-toggle b{display:block;font-size:12px;color:var(--text);font-weight:700;}
+.deep-toggle em{display:block;font-size:10.5px;color:var(--text-dim);font-style:normal;line-height:1.45;margin-top:2px;}
+.deep-only{grid-column:1/-1;margin:6px 0 2px;}
+.deep-only summary{cursor:pointer;font-size:11px;font-weight:700;color:var(--purple);list-style:none;padding:4px 0;}
+.deep-only summary::-webkit-details-marker{display:none;}
+.deep-only textarea{width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:var(--text);font:inherit;font-size:12px;resize:vertical;min-height:44px;margin-bottom:8px;outline:none;}
+.deep-only textarea:focus{border-color:var(--purple);}
+.deep-only label{display:block;font-size:10.5px;font-weight:600;color:var(--text-dim);margin-bottom:3px;}
+.dial-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:6px 14px;}
+.dial-row{display:flex;align-items:center;gap:8px;font-size:10.5px;color:var(--text-dim);}
+.dial-row span.dial-name{width:104px;flex-shrink:0;text-transform:capitalize;}
+.dial-row input[type=range]{flex:1;height:18px;}
+.dial-row b{width:16px;text-align:right;color:var(--text);font-size:11px;}
 .trader-config{display:none;position:fixed;inset:0;z-index:5;background:rgba(10,37,64,.45);padding:24px;overflow:auto;}
 .trader-config.open{display:block;}
 .config-dialog{max-width:960px;margin:0 auto;background:var(--card);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-lg);padding:26px;}
@@ -256,6 +271,14 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
         </div>
         <input type="file" id="cfgUploadInput" accept=".json,application/json" style="display:none" onchange="uploadConfigFile(this)">
         <div class="cfg-io-status" id="cfgIoStatus"></div>
+        <label class="deep-toggle">
+          <input type="checkbox" id="homeDeepPersonaInput" onchange="autoSaveConfig(true)">
+          <span>
+            <b>Deep personality simulation</b>
+            <em>Traders get a fuller character and explain each trade in more
+            detail. Slower and uses more tokens.</em>
+          </span>
+        </label>
       </div>
 
       <div class="field-group">
@@ -367,6 +390,7 @@ async function loadConfig(){
       setVal('homeSocialInput',c.social_influence);
       document.getElementById('socialInfluenceVal').textContent=Math.round(parseFloat(c.social_influence)*100)+'%';
     }
+    document.getElementById('homeDeepPersonaInput').checked=c.deep_persona===true;
     renderSummary(c.traders||[]);
     renderStockSummaryFromConfig();
     renderPlayerJoin();
@@ -446,6 +470,7 @@ function autoSaveConfig(immediate = false){
     fee: Math.max(0, numOr('homeFeeInput', 0)),
     slip: Math.max(0, numOr('homeSlipInput', 0)),
     social_influence: Math.max(0, Math.min(1, numOr('homeSocialInput', 0))),
+    deep_persona: !!document.getElementById('homeDeepPersonaInput').checked,
   };
   localStorage.setItem('ats_config', JSON.stringify(c));
   syncToServer(immediate);
@@ -462,8 +487,37 @@ function closeConfig(){document.getElementById('traderConfig').classList.remove(
 function loadStoredConfig(){try{return JSON.parse(localStorage.getItem('ats_config')||'{}');}catch(e){return {};}}
 function renderTraderRows(traders){
   const head=`<div class="trader-row trader-head"><span>Name</span><span>API Key</span><span>Base URL</span><span>Model</span><span>Personality</span><span></span><span></span></div>`;
-  const rows=traders.map((t,i)=>`<div class="trader-row" data-index="${i}" data-provider="${esc(t.provider||'openai')}"><input data-field="name" value="${esc(t.name||`Trade ${i+1}`)}" placeholder="Trade ${i+1}" oninput="autoSaveTraders()"><input data-field="api_key" type="password" value="${esc(t.api_key||'')}" placeholder="API key" oninput="autoSaveTraders()"><input data-field="base_url" value="${esc(t.base_url||'')}" placeholder="Base URL (optional)" oninput="autoSaveTraders()"><input data-field="model" value="${esc(t.model||'gpt-4o')}" placeholder="Model" oninput="autoSaveTraders()"><select data-field="personality" onchange="autoSaveTraders()">${personalityOptions(t.personality||DEFAULT_PERSONALITIES[i]||'balanced')}</select><button class="test-api" onclick="testApi(this)">Test API</button><button class="remove-trader" onclick="removeTrader(this)" title="Remove trader">×</button><div class="test-status"></div></div>`).join('');
+  const rows=traders.map((t,i)=>`<div class="trader-row" data-index="${i}" data-provider="${esc(t.provider||'openai')}"><input data-field="name" value="${esc(t.name||`Trade ${i+1}`)}" placeholder="Trade ${i+1}" oninput="autoSaveTraders()"><input data-field="api_key" type="password" value="${esc(t.api_key||'')}" placeholder="API key" oninput="autoSaveTraders()"><input data-field="base_url" value="${esc(t.base_url||'')}" placeholder="Base URL (optional)" oninput="autoSaveTraders()"><input data-field="model" value="${esc(t.model||'gpt-4o')}" placeholder="Model" oninput="autoSaveTraders()"><select data-field="personality" onchange="autoSaveTraders()">${personalityOptions(t.personality||DEFAULT_PERSONALITIES[i]||'balanced')}</select><button class="test-api" onclick="testApi(this)">Test API</button><button class="remove-trader" onclick="removeTrader(this)" title="Remove trader">×</button><div class="test-status"></div>${deepPersonaPanel(t,i)}</div>`).join('');
   document.getElementById('traderRows').innerHTML=head+rows;
+}
+const DIAL_NAMES=['risk_appetite','loss_sensitivity','herd_pull','patience','resilience','envy','conviction'];
+// Preset dial profiles, mirroring _PERSONALITY_DISPOSITIONS in traits.py.
+// Used only to prefill the sliders; the server re-resolves on launch.
+const PRESET_DIALS={
+  balanced:[5,5,5,5,5,4,5], aggressive:[9,3,2,3,7,6,7], conservative:[2,7,4,8,5,3,6],
+  panicky:[3,9,6,4,2,5,3], greedy:[7,4,3,7,6,7,8], fomo_driven:[8,5,9,2,4,9,3],
+  stubborn:[5,4,1,8,6,3,10], emotional:[6,8,7,3,2,7,3], custom:[5,5,5,5,5,4,5]
+};
+// The persona/dial controls only matter in deep mode, so they stay hidden
+// until the homepage checkbox is on. Saved values persist either way.
+function deepPersonaPanel(t,i){
+  if(!document.getElementById('homeDeepPersonaInput').checked)return '';
+  const preset=PRESET_DIALS[t.personality||DEFAULT_PERSONALITIES[i]||'balanced']||PRESET_DIALS.balanced;
+  const dials=t.dials||{};
+  const sliders=DIAL_NAMES.map((n,k)=>{
+    const v=dials[n]!==undefined?dials[n]:preset[k];
+    return `<div class="dial-row"><span class="dial-name">${n.replace(/_/g,' ')}</span>`
+      +`<input type="range" min="0" max="10" step="1" value="${v}" data-dial="${n}"`
+      +` oninput="this.nextElementSibling.textContent=this.value;autoSaveTraders()"><b>${v}</b></div>`;
+  }).join('');
+  return `<details class="deep-only">
+    <summary>⚙ Character &amp; dials</summary>
+    <label>Additional trait notes (added to this trader's character)</label>
+    <textarea data-field="trait_notes" rows="2" placeholder="e.g. you hold a grudge against tech stocks" oninput="autoSaveTraders()">${esc(t.trait_notes||'')}</textarea>
+    <label>Custom persona (replaces the preset description entirely)</label>
+    <textarea data-field="persona" rows="3" placeholder="Leave blank to use the personality preset" oninput="autoSaveTraders()">${esc(t.persona||'')}</textarea>
+    <div class="dial-grid">${sliders}</div>
+  </details>`;
 }
 function addTrader(){
   // Append ONE trader to whatever is currently in the dialog (DOM state),
@@ -511,6 +565,11 @@ function rowData(row){
     row.dataset.provider = provider;
   }
   d.provider = provider;
+  const dialInputs = row.querySelectorAll('[data-dial]');
+  if (dialInputs.length) {
+    d.dials = {};
+    dialInputs.forEach(x => { d.dials[x.dataset.dial] = Number(x.value); });
+  }
   return d;
 }
 async function testApi(btn){const row=btn.closest('.trader-row'),d=rowData(row),status=row.querySelector('.test-status');status.textContent='Testing…';status.className='test-status';btn.disabled=true;try{const r=await fetch('/api/test_api',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d)});let data;try{data=await r.json();}catch(e){status.textContent='Server returned non-JSON response (HTTP '+r.status+')';status.className='test-status bad';return;}status.textContent=data.ok?data.message:(data.error||'API test failed.');status.className='test-status '+(data.ok?'ok':'bad');}catch(e){status.textContent=e.message;status.className='test-status bad';}finally{btn.disabled=false;}}

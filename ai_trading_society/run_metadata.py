@@ -163,6 +163,15 @@ class RunMetadata:
                 agent_info["model"] = getattr(base, "model")
             if hasattr(a, "personality_name"):
                 agent_info["personality"] = getattr(a, "personality_name")
+            # Persona state, so a run can be read back with the character
+            # that produced it. Deep-mode only.
+            if getattr(a, "deep", False):
+                if getattr(a, "disposition", ""):
+                    agent_info["disposition"] = getattr(a, "disposition")
+                if getattr(a, "dials", None):
+                    agent_info["dials"] = dict(getattr(a, "dials"))
+                if getattr(a, "mood", None):
+                    agent_info["mood"] = dict(getattr(a, "mood"))
             if hasattr(a, "agent_type"):
                 agent_info["agent_type"] = getattr(a, "agent_type")
             agent_roster.append(agent_info)

@@ -92,20 +92,29 @@ class MarketConfig:
     event_probability_multiplier: float = 1.5
     """Multiplier for event probabilities in the unified sandbox."""
 
-    random_traits: bool = True
-    """Whether roster construction may assign randomized personality traits."""
+    # --- Personality ---
+    deep_persona: bool = False
+    """Give each trader a full personality paragraph and ask for longer,
+    in-character reasoning. Off by default: the lean prompt is faster and
+    cheaper, and still carries a one-line disposition."""
+
+    mood_max_step: float = 3.0
+    """Largest change allowed on any mood axis in one round, so a single
+    round cannot swing a personality end to end."""
+
+    mood_intensity: float = 1.0
+    """Scales the deterministic fallback mood formula."""
 
     # --- Social influence ---
     social_influence: float = 0.0
-    """Strength of social-relationship-driven behavior (0.0 = off, 1.0 = strong).
-    Friends/idol trades are mimicked, enemies are faded, creating herding
-    and bank-run cascades."""
+    """Retired: personality no longer overrides decisions, so this no longer
+    scales anything. Kept so saved configs and the homepage slider still
+    round-trip."""
 
     parallel_agents: bool = True
     """Collect agent actions concurrently in worker threads each round, so
-    multiple LLM API calls overlap instead of running sequentially. Agent
-    RNG streams are derived per-agent so threaded scheduling cannot change
-    seeded-run trajectories. Set False for strict sequential execution."""
+    multiple LLM API calls overlap instead of running sequentially. Set
+    False for strict sequential execution."""
 
     # --- Reproducibility / Random seed ---
     seed: Optional[int] = None
@@ -154,7 +163,9 @@ class MarketConfig:
             "fee_rate": self.fee_rate,
             "slippage_rate": self.slippage_rate,
             "event_probability_multiplier": self.event_probability_multiplier,
-            "random_traits": self.random_traits,
+            "deep_persona": self.deep_persona,
+            "mood_max_step": self.mood_max_step,
+            "mood_intensity": self.mood_intensity,
             "social_influence": self.social_influence,
             "parallel_agents": self.parallel_agents,
             "seed": self.seed,

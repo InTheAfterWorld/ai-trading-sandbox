@@ -16,6 +16,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
+from .agents.traits import DIAL_NAMES
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 DEFAULT_CONFIG: Dict[str, Any] = {
@@ -29,6 +31,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "model": "gpt-4o",
     "social_influence": 0.0,
     "player_participates": True,
+    "deep_persona": False,
     "traders": [],
     "stocks": [],
 }
@@ -42,6 +45,9 @@ _VALID_PERSONALITIES = frozenset({
     "balanced", "aggressive", "conservative", "panicky",
     "greedy", "fomo_driven", "stubborn", "emotional",
 })
+
+# Free-text persona fields are length-capped on the way in.
+_MAX_PERSONA_CHARS = 1024
 
 
 def get_config_path() -> Path:
@@ -82,7 +88,28 @@ def _normalize_traders(traders: Any) -> list:
             "api_key": str(t.get("api_key") or ""),
             "base_url": str(t.get("base_url") or ""),
             "personality": personality if personality in _VALID_PERSONALITIES else "",
+            # Deep-mode character fields. Capped so a pasted essay cannot
+            # bloat every prompt; empty means "use the preset".
+            "persona": str(t.get("persona") or "")[:_MAX_PERSONA_CHARS],
+            "trait_notes": str(t.get("trait_notes") or "")[:_MAX_PERSONA_CHARS],
+            "dials": _normalize_dials(t.get("dials")),
         })
+    return out
+
+
+def _normalize_dials(dials: Any) -> Dict[str, float]:
+    """Keep only the known dial names, each clamped to 0-10.
+
+    Missing dials are simply absent; the roster fills them from the
+    personality preset.
+    """
+    if not isinstance(dials, dict):
+        return {}
+    out: Dict[str, float] = {}
+    for name in DIAL_NAMES:
+        num = _coerce_number(dials.get(name))
+        if num is not None:
+            out[name] = max(0.0, min(10.0, num))
     return out
 
 
@@ -127,7 +154,7 @@ _RANGES: Dict[str, Tuple[float, float]] = {
     "social_influence": (0.0, 1.0),
 }
 _STR_KEYS = ("provider", "model")
-_BOOL_KEYS = ("player_participates",)
+_BOOL_KEYS = ("player_participates", "deep_persona")
 
 
 def _coerce_number(val: Any) -> Optional[float]:

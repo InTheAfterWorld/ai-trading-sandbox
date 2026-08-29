@@ -13,7 +13,6 @@ Core responsibilities:
 import logging
 import math
 import random
-import zlib
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from types import ModuleType
@@ -122,30 +121,10 @@ class MarketEnv:
             seen.add(a.agent_id)
         self.agents: Dict[str, BaseAgent] = {a.agent_id: a for a in agents}
 
-        # Inject RNG into agents.
-        #
-        # When the environment is seeded, each agent receives its own
-        # deterministic RNG stream derived from (seed, agent_id) instead of
-        # sharing self.rng. Agent act() calls run concurrently in worker
-        # threads (parallel_agents config), so per-agent streams keep seeded
-        # runs reproducible regardless of thread scheduling order. The
-        # environment's own stream keeps driving events / price noise as
-        # before. When unseeded (self.rng = the random module), agents keep
-        # sharing it to preserve legacy external-seeding behavior.
-        for index, a in enumerate(agents):
-            agent_rng = self.rng
-            if isinstance(self.rng, random.Random):
-                digest = zlib.crc32(str(a.agent_id).encode("utf-8"))
-                agent_rng = random.Random(((self._base_seed or 0) << 32) ^ digest ^ index)
-            try:
-                setattr(a, "rng", agent_rng)
-            except Exception:
-                pass
-            if hasattr(a, "base_agent"):
-                try:
-                    setattr(a.base_agent, "rng", agent_rng)
-                except Exception:
-                    pass
+        # No per-agent RNG injection: the only consumer was the personality
+        # dice that used to override decisions. Personality now lives in the
+        # prompt, so agents draw no random numbers. self.rng still drives
+        # events and price noise.
 
         # --- Multi-stock market state ---
         stock_specs = config.get_stock_specs()
@@ -214,6 +193,16 @@ class MarketEnv:
         self.social_map: Dict[str, dict] = {}
         self._recent_actions: Dict[str, dict] = {}
         self._social_influence: Optional[float] = None
+
+        # --- Persona context (deep mode) ---
+        # Starting wealth per agent, so an observation can state real stakes
+        # ("you started with $10,000") and rank agents by return.
+        self._initial_wealths: Dict[str, float] = {
+            aid: self.agent_wealth(a) for aid, a in self.agents.items()
+        }
+        # Holdings as they stood at the start of the current round, used to
+        # tell an agent which moves it was and wasn't positioned for.
+        self._round_start_holdings: Dict[str, Dict[str, float]] = {}
 
         # --- Player action buffer ---
         self._pending_player_actions: Dict[str, dict] = {}
@@ -423,6 +412,13 @@ class MarketEnv:
             # rounds — agents see a continuous trend from the very start.
             full_history = list(sm.pre_history) + list(sm.price_history)
             hist_len = min(len(full_history), self.config.price_history_length)
+            # How far this stock moved in the last completed round, so the
+            # prompt can say what the agent was and was not positioned for.
+            move_pct = 0.0
+            if len(sm.price_history) >= 2 and sm.price_history[-2] > 0:
+                move_pct = round(
+                    (sm.price / sm.price_history[-2] - 1) * 100, 2
+                )
             stocks_data.append({
                 "symbol": sym,
                 "name": sm.name,
@@ -432,6 +428,7 @@ class MarketEnv:
                 "my_holdings": h,
                 "sector": sm.sector,
                 "blurb": sm.blurb,
+                "move_since_last_pct": move_pct,
             })
             total_holdings_value += h * sm.price
 
@@ -446,6 +443,8 @@ class MarketEnv:
             "my_total_holdings": total_holdings,
             "my_wealth": my_wealth,
             "market_sentiment": 0.0,
+            # Real stakes: what this agent started the run with.
+            "initial_wealth": self._initial_wealths.get(agent_id, my_wealth),
         }
 
         # Backward-compat: expose first stock's data as top-level fields.
@@ -486,12 +485,17 @@ class MarketEnv:
                         continue
                     r = self._recent_actions.get(pid)
                     if r and r.get("action", "hold") != "hold":
-                        peers.append({
+                        peer = {
                             "id": pid,
                             "relation": relation,
                             "action": r.get("action", "hold"),
                             "quantity": int(r.get("filled", 0)),
-                        })
+                        }
+                        # Deep mode also lets an agent read what a peer said,
+                        # not just what it did.
+                        if self.config.deep_persona and r.get("reasoning"):
+                            peer["reasoning"] = r["reasoning"]
+                        peers.append(peer)
             if peers:
                 obs["social_peers"] = peers
         influence = self._social_influence
@@ -528,7 +532,83 @@ class MarketEnv:
                 "net_cash_flow": round(net_cash, 2),
             }
 
+        # --- Deep-mode persona context -----------------------------------
+        # Where this agent stands against the others, how the floor feels,
+        # and which of last round's moves it was holding through. Simple
+        # mode omits all of it, so the prompt builder just renders less.
+        if self.config.deep_persona:
+            obs["standing"] = self._standing_for(agent_id)
+            floor = self._floor_mood(obs.get("market_sentiment", 0.0))
+            if floor:
+                obs["floor_mood"] = floor
+            held = self._round_start_holdings.get(agent_id)
+            if held is not None:
+                obs["held_at_round_start"] = {
+                    sym: float(qty) for sym, qty in held.items()
+                }
+
         return obs
+
+    def _standing_for(self, agent_id: str) -> Dict[str, Any]:
+        """Rank this agent by return, and name whoever is leading."""
+        returns: Dict[str, float] = {}
+        for aid in self.agents:
+            start = self._initial_wealths.get(aid, 0.0)
+            returns[aid] = (
+                (self.agent_wealth(aid) / start - 1) * 100 if start > 0 else 0.0
+            )
+        ordered = sorted(returns.items(), key=lambda kv: kv[1], reverse=True)
+        leader_name, leader_return = ordered[0] if ordered else (agent_id, 0.0)
+        my_return = returns.get(agent_id, 0.0)
+        rank = next(
+            (i for i, (aid, _) in enumerate(ordered, 1) if aid == agent_id), 1
+        )
+        return {
+            "rank": rank,
+            "of": len(ordered),
+            "my_return_pct": round(my_return, 2),
+            "leader_name": leader_name,
+            "leader_return_pct": round(leader_return, 2),
+            "gap_to_leader_pct": round(leader_return - my_return, 2),
+        }
+
+    def _floor_mood(self, sentiment: float) -> Optional[Dict[str, str]]:
+        """How the other traders behaved last round, as a mood word.
+
+        Read from the aggregate of everyone's resolved actions plus event
+        sentiment -- distinct from the price move itself.
+        """
+        if not self._recent_actions:
+            return None
+        buys = sum(
+            1 for r in self._recent_actions.values() if r.get("action") == "buy"
+        )
+        sells = sum(
+            1 for r in self._recent_actions.values() if r.get("action") == "sell"
+        )
+        traded = buys + sells
+        if traded == 0:
+            return {
+                "mood": "calm",
+                "sentence": "The floor is quiet -- almost nobody traded last round.",
+            }
+        sell_share = sells / traded
+        if sell_share >= 0.7 and sentiment < 0:
+            mood = "panicked"
+            sentence = "The floor feels panicked -- most traders dumped last round."
+        elif sell_share >= 0.6:
+            mood = "nervous"
+            sentence = "The floor feels nervous -- selling outweighed buying last round."
+        elif sell_share <= 0.3 and sentiment > 0:
+            mood = "euphoric"
+            sentence = "The floor feels euphoric -- almost everyone was buying last round."
+        elif sell_share <= 0.4:
+            mood = "confident"
+            sentence = "The floor feels confident -- buying outweighed selling last round."
+        else:
+            mood = "calm"
+            sentence = "The floor feels calm -- buyers and sellers were evenly matched."
+        return {"mood": mood, "sentence": sentence}
 
     # ------------------------------------------------------------------
     # Main loop: one step
@@ -538,6 +618,12 @@ class MarketEnv:
         """Run one simulation step."""
         self.step_count += 1
         self._step_fills = {}
+        # Snapshot holdings before anything trades, so the next observation
+        # can say which of this round's moves the agent was holding through.
+        self._round_start_holdings = {
+            aid: dict(a.holdings) if isinstance(a.holdings, dict) else {}
+            for aid, a in self.agents.items()
+        }
 
         # ---------- 0. Event system ----------
         # Global events hit every stock; company-specific events hit one
@@ -735,15 +821,20 @@ class MarketEnv:
             )
             # Dominant action = the one with most filled quantity.
             dominant_action = "hold"
+            dominant_reasoning = ""
             max_filled = 0
             for sa in stock_acts.values():
                 f = sa.get("filled_qty", 0)
                 if f > max_filled:
                     max_filled = f
                     dominant_action = sa.get("action", "hold")
+                    dominant_reasoning = str(sa.get("reasoning", ""))
             self._recent_actions[aid] = {
                 "action": dominant_action,
                 "filled": total_filled,
+                # Truncated so one agent's essay cannot bloat every peer's
+                # prompt. Only surfaced in deep mode (see get_observation).
+                "reasoning": dominant_reasoning[:160],
             }
 
         # ---------- 3. Update price per stock ----------
@@ -994,6 +1085,12 @@ class MarketEnv:
                     "cash": a.cash,
                     "holdings": dict(a.holdings) if isinstance(a.holdings, dict) else {},
                     "wealth": self.agent_wealth(a),
+                    # Present only for deep-mode persona agents; None otherwise.
+                    "mood": (
+                        dict(getattr(a, "mood", {}) or {})
+                        if getattr(a, "deep", False) and getattr(a, "mood", None)
+                        else None
+                    ),
                 }
                 for aid, a in self.agents.items()
             },

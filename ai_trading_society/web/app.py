@@ -438,6 +438,11 @@ def api_start():
     player_participates = data.get("player_participates", True)
     if not isinstance(player_participates, bool):
         player_participates = True
+    # Deep personality simulation (default: off). Falls back to the saved
+    # config so a launch that omits the field respects the homepage toggle.
+    deep_persona = data.get("deep_persona")
+    if not isinstance(deep_persona, bool):
+        deep_persona = bool(load_config().get("deep_persona", False))
     provider = data.get("provider") or "openai"
     model = data.get("model") or _DEFAULT_MODELS.get(provider) or "gpt-4o"
     api_key = data.get("api_key", "")
@@ -512,7 +517,7 @@ def api_start():
         fee_rate=fee,
         slippage_rate=slip,
         event_probability_multiplier=1.5,
-        random_traits=True,
+        deep_persona=deep_persona,
         social_influence=social_influence,
         seed=seed,
         stocks=stock_specs,
@@ -526,6 +531,9 @@ def api_start():
             holdings=hold,
             stocks=stock_specs,
             include_player=player_participates,
+            deep_persona=deep_persona,
+            mood_max_step=config.mood_max_step,
+            mood_intensity=config.mood_intensity,
         )
     except RuntimeError as exc:
         print(f"[api/start] build_agent_roster failed: {exc}")
@@ -729,6 +737,8 @@ def api_step():
             "delta": round(delta, 2),
             "score": g["score"],
             "grade": g["grade"],
+            # Deep-mode persona mood; None in simple runs.
+            "mood": getattr(agent, "mood", None) if getattr(agent, "deep", False) else None,
         })
 
     # Update prev_wealths.
@@ -982,6 +992,9 @@ def api_report_export():
                 "requested": a.get("requested", 0),
                 "filled": a.get("filled", 0),
                 "reasoning": a.get("reasoning", ""),
+                # Per-stock breakdown so the report can show each stock's
+                # own reasoning instead of the pipe-joined aggregate.
+                "actions": a.get("actions", []),
                 "wealth": a.get("wealth", 0),
                 "delta": a.get("delta"),
             })
@@ -1160,16 +1173,17 @@ def api_agents_social():
         personality = agent_personality(agent)
         desc = agent_personality_desc(agent)
 
-        # Extract trait values if available
-        traits = {}
-        trait_names = (
-            "panic", "greed", "fomo", "stubbornness",
-            "loss_aversion", "overconfidence", "regret_avoidance",
+        # Persona state: the evolving mood and the fixed sensitivity dials.
+        # Both are deep-mode only; simple runs report neither.
+        deep = bool(getattr(agent, "deep", False))
+        mood = (
+            {k: round(float(v), 2) for k, v in getattr(agent, "mood", {}).items()}
+            if deep else {}
         )
-        for t in trait_names:
-            val = getattr(agent, t, None)
-            if val is not None and val > 0:
-                traits[t] = round(float(val), 2)
+        dials = (
+            {k: round(float(v), 2) for k, v in getattr(agent, "dials", {}).items()}
+            if deep else {}
+        )
 
         social = resolved.get(aid, {"idol": None, "friends": [], "enemies": []})
 
@@ -1178,7 +1192,8 @@ def api_agents_social():
             "type": agent_type_label(agent),
             "personality": personality,
             "personality_desc": desc,
-            "traits": traits,
+            "mood": mood,
+            "dials": dials,
             "idol": social.get("idol"),
             "friends": social.get("friends", []),
             "enemies": social.get("enemies", []),

@@ -509,6 +509,7 @@ td.reason{font-size:11px;color:var(--text-dim);font-style:italic;line-height:1.4
 }
 .sa-desc{font-size:11.5px;color:var(--text-dim);line-height:1.5;margin-bottom:10px;}
 .sa-traits{display:flex;flex-direction:column;gap:5px;margin-bottom:10px;}
+.sa-mood-title{font-size:10.5px;font-weight:700;color:var(--text-dim);text-transform:uppercase;letter-spacing:.6px;margin:8px 0 4px;}
 .sa-trait{display:flex;align-items:center;gap:8px;font-size:10.5px;color:var(--text-dim);}
 .sa-trait .t-label{width:90px;flex-shrink:0;text-transform:capitalize;}
 .sa-trait .t-bar{flex:1;height:5px;background:var(--card);border-radius:3px;overflow:hidden;}
@@ -550,6 +551,9 @@ td.reason{font-size:11px;color:var(--text-dim);font-style:italic;line-height:1.4
   border-left:3px solid var(--purple);
 }
 .ar-reasoning.error{color:var(--red);border-left-color:var(--red);font-style:normal;font-weight:600;}
+.ar-reason-stock{display:block;margin-bottom:6px;}
+.ar-reason-stock:last-child{margin-bottom:0;}
+.ar-reason-stock b{font-style:normal;color:var(--text);margin-right:6px;}
 .sa-orders{
   margin:10px 0;padding:9px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px;
 }
@@ -1289,7 +1293,7 @@ async function startSim(opts){
     .filter(s=>s.name);
 
   try{
-    const resp=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({steps,api_key:apiKey,traders,price,cash,hold,fee,slip,social_influence:socialInfluence,player_participates:cfg.player_participates!==false,stocks,...(opts||{})})});
+    const resp=await fetch('/api/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({steps,api_key:apiKey,traders,price,cash,hold,fee,slip,social_influence:socialInfluence,player_participates:cfg.player_participates!==false,deep_persona:cfg.deep_persona===true,stocks,...(opts||{})})});
     const data=await resp.json();
     if(data.error){showError(data.error);return;}
 
@@ -1561,6 +1565,23 @@ function formatHoldingsDisplay(a){
   return `${total} (${entries.map(([k,v])=>`${v} ${k}`).join(', ')})`;
 }
 
+// Each stock gets its own reasoning block. The agent explained every
+// position separately, so the pipe-joined "Stock 1: ... | Stock 2: ..."
+// string threw that structure away. Falls back to the aggregate string for
+// legacy rounds or agents with no per-stock breakdown.
+function perStockReasoningHtml(a){
+  const acts=(a&&a.actions)||[];
+  const blocks=acts.filter(x=>x&&x.reasoning).map(x=>{
+    const act=String(x.action||'hold').toLowerCase();
+    const qty=(act==='buy'||act==='sell')&&x.filled?` ${x.filled}`:'';
+    return `<div class="ar-reason-stock">`
+      +`<b>${escapeHtml(String(x.symbol||''))} ${act.toUpperCase()}${qty}</b>`
+      +`<span>${escapeHtml(String(x.reasoning))}</span></div>`;
+  });
+  if(blocks.length)return blocks.join('');
+  return a&&a.reasoning?escapeHtml(String(a.reasoning)):'';
+}
+
 function agentRowHtml(a,flash){
   const ret=a.return_pct||0;
   const retCls=ret>=0?'pos':'neg';
@@ -1572,16 +1593,21 @@ function agentRowHtml(a,flash){
   const pc=PERSONALITY_COLORS[personality]||PERSONALITY_COLORS.balanced;
   const pshort=PERSONALITY_SHORT[personality]||personality.slice(0,5);
   const desc=(social&&social.personality_desc)||a.personality_desc||'';
-  const traits=(social&&social.traits)||{};
+  // Deep-mode mood, refreshed every round from /api/step.
+  const mood=a.mood||(social&&social.mood)||{};
   const reasoning=a.reasoning||'';
+  // Errors carry a single message, not per-stock reasoning.
+  const reasoningHtml=a.error?escapeHtml(String(reasoning)):perStockReasoningHtml(a);
   const delta=a.delta||0;
 
   let detail='';
   if(expanded){
-    const tkeys=Object.keys(traits);
-    const traitsHtml=tkeys.length>0?('<div class="sa-traits">'+tkeys.map(t=>{
-      const val=Math.min(Math.max(traits[t]||0,0),1);
-      return `<div class="sa-trait"><span class="t-label">${t.replace(/_/g,' ')}</span><span class="t-bar"><span class="t-fill" style="width:${(val*100).toFixed(0)}%"></span></span><span class="t-val">${(val*100).toFixed(0)}</span></div>`;
+    // Mood panel: 0-10 per axis, shown only when the agent has a mood
+    // (deep runs). Simple runs render nothing here.
+    const mkeys=Object.keys(mood);
+    const traitsHtml=mkeys.length>0?('<div class="sa-mood-title">Mood</div><div class="sa-traits">'+mkeys.map(t=>{
+      const val=Math.min(Math.max(Number(mood[t])||0,0),10);
+      return `<div class="sa-trait"><span class="t-label">${t.replace(/_/g,' ')}</span><span class="t-bar"><span class="t-fill" style="width:${(val*10).toFixed(0)}%"></span></span><span class="t-val">${val.toFixed(0)}</span></div>`;
     }).join('')+'</div>'):'';
 
     const relTag=(n,c)=>`<span class="rel-tag ${c}">${n}</span>`;
@@ -1648,7 +1674,7 @@ function agentRowHtml(a,flash){
     }
 
     detail=`<div class="ar-detail">
-      ${reasoning?`<div class="ar-reasoning${a.error?' error':''}">${escapeHtml(reasoning)}</div>`:''}
+      ${reasoningHtml?`<div class="ar-reasoning${a.error?' error':''}">${reasoningHtml}</div>`:''}
       ${actsHtml}
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         <span class="ar-personality" style="background:${pc.bg};color:${pc.color};">${personality}</span>
@@ -2394,7 +2420,7 @@ function openAgentTimeline(id){
           </div>`;
         }
 
-        const reasonText=r.reasoning?escapeHtml(r.reasoning):'—';
+        const reasonText=perStockReasoningHtml(r)||'—';
 
         return `<tr>
           <td class="center"><b>#${r.round}</b></td>
@@ -3110,10 +3136,11 @@ const GUIDE_SECTIONS=[
 <li>Agents receive active events in their prompts — descriptions directly influence their decisions.</li>
 </ul>`},
 {id:'agents',icon:'🤖',title:'Agents & Personalities',html:`
-<p>Each AI trader wraps its LLM brain in a <b>personality preset</b> (aggressive, panicky, conservative…) that bends decisions through traits like panic selling, greed, FOMO and regret avoidance.</p>
+<p>Each AI trader is given a <b>personality preset</b> (aggressive, panicky, conservative…) in its prompt. Nothing overrides what the model decides, so an agent's action always matches the reasoning printed beside it.</p>
+<p><b>Deep personality simulation</b> (a checkbox on the homepage, off by default) gives each trader a fuller character, sensitivity dials, a mood that shifts with its results, and richer context — its standing against the others, how the floor feels, what rivals said. Simple mode keeps a one-line character and a lean, faster prompt.</p>
 <ul>
-<li>Click an agent row to expand: cash, holdings, wealth, round Δ, per-stock orders and this round's <b>reasoning</b>.</li>
-<li>Trait bars (0-100) show the strength of each bias.</li>
+<li>Click an agent row to expand: cash, holdings, wealth, round Δ, per-stock orders and this round's <b>reasoning</b>, one line per stock.</li>
+<li>In deep mode, <b>Mood</b> bars (0-10: confidence, stress, frustration) move round to round.</li>
 <li>📋 <b>Timeline</b> opens a log of every decision the agent ever made, with reasoning and outcome.</li>
 <li>💬 Chat (<span class="guide-tag">C</span>) talks to an agent in character via its API.</li>
 </ul>`},

@@ -289,6 +289,31 @@ def _events_section(events: List[Dict[str, Any]]) -> str:
     return "".join(items)
 
 
+def _per_stock_reasoning_html(rd: Dict[str, Any]) -> str:
+    """Render one round's reasoning, one line per stock.
+
+    Falls back to the aggregate ``reasoning`` string for rounds recorded
+    before the per-stock breakdown was captured.
+    """
+    per_stock = rd.get("actions") or []
+    lines = []
+    for entry in per_stock:
+        if not isinstance(entry, dict) or not entry.get("reasoning"):
+            continue
+        sym = _esc(str(entry.get("symbol", "")))
+        act = str(entry.get("action", "hold")).lower()
+        qty = entry.get("filled", 0)
+        head = f"{sym} {act.upper()}"
+        if act in ("buy", "sell") and qty:
+            head += f" {qty}"
+        lines.append(
+            f'<div><b>{head}</b> — {_esc(str(entry["reasoning"]))}</div>'
+        )
+    if lines:
+        return "".join(lines)
+    return _esc(rd.get("reasoning") or "")
+
+
 def _decision_log_section(agent_logs: Dict[str, List[Dict[str, Any]]]) -> str:
     if not agent_logs:
         return '<div class="empty">No decisions recorded.</div>'
@@ -310,7 +335,7 @@ def _decision_log_section(agent_logs: Dict[str, List[Dict[str, Any]]]) -> str:
                 f'<span class="{"pos" if delta >= 0 else "neg"}">{delta:+,.0f}</span>'
                 if delta is not None else "—"
             )
-            reasoning = _esc(rd.get("reasoning") or "")
+            reasoning = _per_stock_reasoning_html(rd)
             rows.append(
                 f'<tr><td>{rd.get("round", "?")}</td><td>{badge}</td>'
                 f'<td class="num">{qty or "—"}</td>'

@@ -64,6 +64,30 @@ _DEFAULT_MAX_TOKENS: Dict[str, int] = {
 # model from writing essays. 2048 comfortably fits 5 stocks + reasoning.
 _DEFAULT_MAX_TOKENS_FALLBACK = 2048
 
+# How much reasoning to ask for per stock. The simple wording is the rule
+# this project has always used; deep mode trades tokens for character.
+_REASONING_DETAIL_SIMPLE = "1-2 short sentences, under 30 words"
+_REASONING_DETAIL_DEEP = (
+    "2-4 sentences when you buy or sell -- explain your thinking AND how you "
+    "feel about it, in character; 1 sentence is enough for a hold"
+)
+
+# Deep mode invites a few extra OPTIONAL fields. Every one may be omitted:
+# the parser drops anything missing or malformed, so a model that ignores
+# all of them still produces a valid decision.
+_DEEP_OPTIONAL_FIELDS = (
+    "\n"
+    "\n"
+    "Optional extras (include them only if you want to; omit freely):\n"
+    '- "mood": {"confidence": <0-10>, "stress": <0-10>, '
+    '"frustration": <0-10>} alongside "decisions", saying how you feel '
+    "AFTER deciding. Move each number by a few points at most.\n"
+    '- "lesson": one short sentence you want to remember next round.\n'
+    '- "stop_loss" / "target": prices on a buy or sell decision, if you are '
+    "committing to an exit. Nothing executes them automatically -- you will "
+    "be reminded next round and it is up to you to act."
+)
+
 # HTTP statuses worth exactly one automatic retry: rate limiting and
 # transient server-side failures. Auth (401/403) and malformed requests
 # (400) are excluded - they fail identically the second time.
@@ -73,6 +97,24 @@ _RETRYABLE_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 # call. Cap how many a single agent may spend across a whole run so one
 # badly-behaved model cannot multiply the cost and latency of every round.
 _DEFAULT_REPAIR_BUDGET = 6
+
+
+def _coerce_price(value: Any) -> Optional[float]:
+    """Normalize an optional price ("$290", 290, "290.5") to a float.
+
+    Returns None for anything uninterpretable, so a malformed stop or
+    target is simply dropped rather than affecting the decision.
+    """
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value) if math.isfinite(value) and value > 0 else None
+    if isinstance(value, str):
+        match = re.search(r"\d+(?:\.\d+)?", value)
+        if match:
+            parsed = float(match.group())
+            return parsed if parsed > 0 else None
+    return None
 
 
 def _error_status(exc: BaseException) -> Optional[int]:
@@ -228,6 +270,11 @@ class ExternalAIAgent(BaseAgent):
         # SHORT-TERM memory: one-line summaries of the agent's decisions in
         # the most recent rounds (capped at memory_window entries).
         self._short_term_memory: List[str] = []
+        # Lessons the model wrote for itself, replayed in later prompts.
+        self._lessons: List[str] = []
+        # Exit levels the model committed to per stock: {sym: {stop_loss,
+        # target}}. Replayed as a reminder next round -- never auto-executed.
+        self._position_plans: Dict[str, Dict[str, float]] = {}
         # LONG-TERM memory: significant market events the agent has lived
         # through (|price impact| >= 5%), kept for the whole run.
         self._key_events: List[Dict[str, Any]] = []
@@ -258,7 +305,15 @@ class ExternalAIAgent(BaseAgent):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _default_system_prompt() -> str:
+    def _default_system_prompt(deep: bool = False) -> str:
+        """Build the JSON-contract system prompt.
+
+        ``deep`` asks for longer, in-character reasoning; the default is the
+        lean rule this project has always used.
+        """
+        reasoning_detail = (
+            _REASONING_DETAIL_DEEP if deep else _REASONING_DETAIL_SIMPLE
+        )
         return (
             "You are a professional stock trader managing a portfolio in a simulated market. "
             "Your goal is to maximize total wealth (cash + sum of all holdings * their prices).\n"
@@ -280,13 +335,13 @@ class ExternalAIAgent(BaseAgent):
             "- Use double quotes for all keys and string values.\n"
             "- 'action' must be exactly one of: \"buy\", \"sell\", \"hold\" (lowercase).\n"
             "- 'quantity' must be an integer (0 for hold).\n"
-            "- 'reasoning': 1-2 short sentences, under 30 words.\n"
+            f"- 'reasoning': {reasoning_detail}.\n"
             "- Include one decision object for EVERY stock listed in the market data,\n"
             "  using each stock's exact name.\n"
             "\n"
             "Exact schema:\n"
             '{"decisions": [{"name": "<stock name>", "action": "buy" | "sell" | "hold", '
-            '"quantity": <integer>, "reasoning": "<1-2 short sentences>"}, ...]}\n'
+            f'"quantity": <integer>, "reasoning": "<{reasoning_detail}>"}}, ...]}}\n'
             "\n"
             "Example response for two stocks:\n"
             '{"decisions": [{"name": "Stock 1", "action": "buy", "quantity": 10, '
@@ -295,6 +350,7 @@ class ExternalAIAgent(BaseAgent):
             '"reasoning": "Sideways trend; waiting for a clearer signal."}]}\n'
             "\n"
             "You remember past decisions; learn from them."
+            + (_DEEP_OPTIONAL_FIELDS if deep else "")
         )
 
     def _build_market_summary(self) -> str:
@@ -330,8 +386,41 @@ class ExternalAIAgent(BaseAgent):
             f"({total_return:+.1%} total return). "
             f"Range: ${min_price:.2f}-${max_price:.2f}. "
             f"Short-term trend: {short_trend:+.1%}.",
+            self._describe_regime(prices, short_trend),
         ]
-        return " ".join(parts)
+        return " ".join(p for p in parts if p)
+
+    @staticmethod
+    def _describe_regime(prices: List[float], short_trend: float) -> str:
+        """Name the market regime in words, not just a percentage.
+
+        A number tells the model how much moved; a word tells it what kind
+        of market it is trading in.
+        """
+        window = prices[-8:]
+        if len(window) < 2:
+            return ""
+        # Mean absolute step size, as a fraction of price.
+        steps = [
+            abs(window[i] - window[i - 1]) / max(window[i - 1], 0.01)
+            for i in range(1, len(window))
+        ]
+        churn = sum(steps) / len(steps)
+        direction = abs(short_trend)
+
+        if churn >= 0.03:
+            regime = "volatile -- prices are swinging hard round to round"
+        elif direction >= 0.05:
+            regime = (
+                "a strong uptrend" if short_trend > 0 else "a strong downtrend"
+            )
+        elif direction >= 0.02:
+            regime = "a mild uptrend" if short_trend > 0 else "a mild downtrend"
+        elif churn <= 0.005:
+            regime = "calm and quiet -- barely moving"
+        else:
+            regime = "choppy and directionless -- no clear trend"
+        return f"Regime: the market is {regime}."
 
     def _record_key_events(self, step: int, active_events: List[Dict[str, Any]]) -> None:
         """
@@ -432,6 +521,197 @@ class ExternalAIAgent(BaseAgent):
 
         return "\n\n".join(sections)
 
+    @staticmethod
+    def _persona_lines(observation: Dict[str, Any]) -> List[str]:
+        """WHO YOU ARE / HOW YOU FEEL, when the persona layer supplied one."""
+        persona = observation.get("persona")
+        if not isinstance(persona, dict):
+            return []
+        lines = []
+        disposition = persona.get("disposition")
+        if disposition:
+            lines.append("=== WHO YOU ARE ===")
+            lines.append(str(disposition))
+        mood = persona.get("mood")
+        if isinstance(mood, dict) and mood:
+            hint = persona.get("scale_hint", "")
+            lines.append("")
+            lines.append("=== HOW YOU FEEL RIGHT NOW ===")
+            lines.append(
+                "Confidence {c:.0f}/10 · Stress {s:.0f}/10 · "
+                "Frustration {f:.0f}/10{hint}".format(
+                    c=float(mood.get("confidence", 0)),
+                    s=float(mood.get("stress", 0)),
+                    f=float(mood.get("frustration", 0)),
+                    hint=f"   ({hint})" if hint else "",
+                )
+            )
+            pressure = persona.get("pressure")
+            if pressure:
+                lines.append(str(pressure))
+        return lines
+
+    @staticmethod
+    def _stakes_line(observation: Dict[str, Any]) -> str:
+        """Frame the P&L as real money against the starting stake."""
+        start = observation.get("initial_wealth")
+        if start is None:
+            return ""
+        try:
+            start_f = float(start)
+            wealth = float(observation.get("my_wealth", 0.0))
+        except (TypeError, ValueError):
+            return ""
+        if start_f <= 0:
+            return ""
+        delta = wealth - start_f
+        word = "up" if delta >= 0 else "down"
+        return (
+            f"- Stakes: you started with ${start_f:,.0f}. You are at "
+            f"${wealth:,.0f} -- {word} ${abs(delta):,.0f} "
+            f"({delta / start_f * 100:+.1f}%)."
+        )
+
+    @staticmethod
+    def _concentration_line(observation: Dict[str, Any]) -> str:
+        """Flag when most of the agent's wealth sits in one name.
+
+        Deep-only: the data this line needs is always in the observation,
+        so the persona block is what gates it (MarketEnv supplies
+        ``persona`` only in deep mode -- the same contract the other
+        deep-only lines in _build_prompt follow).
+        """
+        if not observation.get("persona"):
+            return ""
+        stocks = observation.get("stocks") or []
+        try:
+            wealth = float(observation.get("my_wealth", 0.0))
+        except (TypeError, ValueError):
+            return ""
+        if wealth <= 0 or not stocks:
+            return ""
+        biggest, biggest_value = "", 0.0
+        for s in stocks:
+            value = float(s.get("my_holdings", 0) or 0) * float(s.get("price", 0) or 0)
+            if value > biggest_value:
+                biggest_value, biggest = value, (
+                    s.get("name") or s.get("symbol") or "a stock"
+                )
+        share = biggest_value / wealth
+        if share < 0.4:
+            return ""
+        return (
+            f"- Concentration: {share * 100:.0f}% of your wealth is in "
+            f"{biggest} -- that is a big single bet."
+        )
+
+    @staticmethod
+    def _standing_line(observation: Dict[str, Any]) -> str:
+        """Rank plus a named leader, so the gap has a face on it."""
+        standing = observation.get("standing")
+        if not isinstance(standing, dict) or not standing.get("of"):
+            return ""
+        leader = standing.get("leader_name")
+        gap = standing.get("gap_to_leader_pct", 0.0)
+        line = (
+            f"- Standing: you are {standing.get('rank')} of "
+            f"{standing.get('of')} at {standing.get('my_return_pct', 0.0):+.1f}%."
+        )
+        if leader and gap and float(gap) > 0.01:
+            line += (
+                f" {leader} is leading at "
+                f"{standing.get('leader_return_pct', 0.0):+.1f}% -- "
+                f"{float(gap):.1f} points ahead of you."
+            )
+        return line
+
+    @staticmethod
+    def _exposure_line(observation: Dict[str, Any]) -> str:
+        """What moved last round, and whether the agent was in it."""
+        stocks = observation.get("stocks") or []
+        held = observation.get("held_at_round_start")
+        if not stocks or not isinstance(held, dict):
+            return ""
+        bits = []
+        for s in stocks:
+            name = s.get("name") or s.get("symbol") or "?"
+            try:
+                move = float(s.get("move_since_last_pct", 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if abs(move) < 1.0:
+                continue
+            was_in = float(held.get(name, 0) or 0) > 0
+            if was_in:
+                bits.append(f"{name} {move:+.1f}% (you held it)")
+            else:
+                bits.append(f"{name} {move:+.1f}% (you weren't in it)")
+        if not bits:
+            return ""
+        return "- Since last round: " + "; ".join(bits) + "."
+
+    @staticmethod
+    def _floor_mood_line(observation: Dict[str, Any]) -> str:
+        """How the rest of the floor behaved, distinct from the price move."""
+        floor = observation.get("floor_mood")
+        if not isinstance(floor, dict) or not floor.get("sentence"):
+            return ""
+        return f"- {floor['sentence']}"
+
+    @staticmethod
+    def _peer_talk_lines(observation: Dict[str, Any]) -> List[str]:
+        """Quote what the peers who traded actually said."""
+        peers = observation.get("social_peers") or []
+        quotes = [
+            f"  {p.get('id', '?')} ({p.get('relation', 'peer')}, "
+            f"{p.get('action', 'hold')}): \"{p['reasoning']}\""
+            for p in peers
+            if isinstance(p, dict) and p.get("reasoning")
+        ]
+        if not quotes:
+            return []
+        return ["", "=== WHAT OTHERS ARE SAYING ===", *quotes]
+
+    def _lesson_lines(self) -> List[str]:
+        """Replay the lessons the model wrote for itself."""
+        lessons = getattr(self, "_lessons", None)
+        if not lessons:
+            return []
+        return ["", "=== LESSONS YOU'VE LEARNED ===",
+                *(f"  - {lesson}" for lesson in lessons)]
+
+    def _plan_lines(self, observation: Dict[str, Any]) -> List[str]:
+        """Remind the model of exit levels it committed to.
+
+        Purely a reminder: nothing here executes, so the agent has to act on
+        its own plan or explain why it is not.
+        """
+        plans = getattr(self, "_position_plans", None)
+        if not plans:
+            return []
+        prices = {
+            (s.get("name") or s.get("symbol")): s.get("price")
+            for s in (observation.get("stocks") or [])
+        }
+        out = []
+        for sym, plan in plans.items():
+            price = prices.get(sym)
+            if price is None:
+                continue
+            bits = []
+            if plan.get("stop_loss") is not None:
+                bits.append(f"stop at ${plan['stop_loss']:.2f}")
+            if plan.get("target") is not None:
+                bits.append(f"target ${plan['target']:.2f}")
+            if bits:
+                out.append(
+                    f"  {sym}: you set {' and '.join(bits)}; it is now "
+                    f"${float(price):.2f}."
+                )
+        if not out:
+            return []
+        return ["", "=== PLANS YOU COMMITTED TO ===", *out]
+
     def _build_prompt(self, observation: Dict[str, Any]) -> str:
         """Convert a market observation into a natural-language prompt."""
         # Track market history for long-horizon summary (primary stock).
@@ -442,7 +722,13 @@ class ExternalAIAgent(BaseAgent):
         if len(self._market_history) > 100:
             self._market_history = self._market_history[-100:]
 
-        lines = [
+        # Character first, so the model reads who it is before the numbers.
+        # Present only when the persona layer supplied one (deep mode).
+        lines = list(self._persona_lines(observation))
+        if lines:
+            lines.append("")
+
+        lines += [
             f"Market Data (Step {observation['step']}):",
             f"- Your Cash: ${observation['my_cash']:.2f}",
             f"- Your Total Wealth: ${observation['my_wealth']:.2f}",
@@ -474,6 +760,19 @@ class ExternalAIAgent(BaseAgent):
             lines.append(f"- Current Price: ${observation.get('price', 0):.2f}")
             lines.append(f"- Recent Prices: [{price_str}]")
             lines.append(f"- Your Holdings: {observation.get('my_holdings', 0)}")
+
+        # Factual context. Each block renders only when its data is in the
+        # observation: the stakes line is always there, the rest arrive only
+        # in deep mode (MarketEnv gates them).
+        for line in (
+            self._stakes_line(observation),
+            self._concentration_line(observation),
+            self._standing_line(observation),
+            self._exposure_line(observation),
+            self._floor_mood_line(observation),
+        ):
+            if line:
+                lines.append(line)
 
         # Include market sentiment when available.
         sentiment = observation.get("market_sentiment", 0.0)
@@ -516,6 +815,11 @@ class ExternalAIAgent(BaseAgent):
             memory_ctx = self._build_memory_context(observation)
             if memory_ctx:
                 lines.append(f"\n{memory_ctx}")
+
+        # Deep-mode blocks that live on the agent rather than the observation.
+        lines += self._peer_talk_lines(observation)
+        lines += self._lesson_lines()
+        lines += self._plan_lines(observation)
 
         lines.append(
             "\nWhat actions do you take for each stock? Output a decision object for "
@@ -917,18 +1221,25 @@ class ExternalAIAgent(BaseAgent):
 
     def _scan_json(
         self, text: str
-    ) -> tuple[Optional[List[Dict[str, Any]]], Optional[Dict[str, Any]], bool]:
+    ) -> tuple[
+        Optional[List[Dict[str, Any]]],
+        Optional[Dict[str, Any]],
+        bool,
+        Dict[str, Any],
+    ]:
         """
         Scan ``text`` for trading-decision JSON at any position.
 
-        Returns (best_decisions, best_legacy, saw_invalid). Mirrors the
-        historical parsing semantics: for multi-stock format all valid
+        Returns (best_decisions, best_legacy, saw_invalid, extras). Mirrors
+        the historical parsing semantics: for multi-stock format all valid
         decision entries are collected; for legacy format the LAST valid
-        single action wins.
+        single action wins. ``extras`` carries the optional top-level
+        "mood" / "lesson" fields when the winning object had them.
         """
         decoder = json.JSONDecoder()
         best_decisions: Optional[List[Dict[str, Any]]] = None
         best_legacy: Optional[Dict[str, Any]] = None
+        best_extras: Dict[str, Any] = {}
         saw_invalid = False
 
         for match in re.finditer(r"[\[{]", text):
@@ -961,15 +1272,25 @@ class ExternalAIAgent(BaseAgent):
                         saw_invalid = True
                         continue
                     stk_name = str(d.get("name") or d.get("symbol") or "").strip()
-                    parsed_list.append({
+                    entry = {
                         "name": stk_name,
                         "symbol": stk_name,
                         "action": action,
                         "quantity": quantity,
                         "reasoning": str(d.get("reasoning", "")).strip(),
-                    })
+                    }
+                    # Optional commitments; dropped silently when absent or
+                    # unparseable, so the decision itself is never at risk.
+                    for field in ("stop_loss", "target"):
+                        price = _coerce_price(d.get(field))
+                        if price is not None:
+                            entry[field] = price
+                    parsed_list.append(entry)
                 if parsed_list:
                     best_decisions = parsed_list
+                    best_extras = {
+                        k: data[k] for k in ("mood", "lesson") if k in data
+                    }
                     saw_invalid = False
                 continue
 
@@ -993,7 +1314,7 @@ class ExternalAIAgent(BaseAgent):
                 "reasoning": str(data.get("reasoning", "")).strip(),
             }
 
-        return best_decisions, best_legacy, saw_invalid
+        return best_decisions, best_legacy, saw_invalid, best_extras
 
     # Reasoning-model thought blocks: <think>...</think> (DeepSeek-R1, QwQ)
     # and <|begin_of_thought|>...<|end_of_thought|>. Some providers strip the
@@ -1055,14 +1376,23 @@ class ExternalAIAgent(BaseAgent):
         best_decisions: Optional[List[Dict[str, Any]]] = None
         best_legacy: Optional[Dict[str, Any]] = None
         saw_invalid = False
+        extras: Dict[str, Any] = {}
 
         for text in [response] + self._repair_json_candidates(response):
-            best_decisions, best_legacy, saw_invalid = self._scan_json(text)
+            best_decisions, best_legacy, saw_invalid, extras = self._scan_json(text)
             if best_decisions is not None or best_legacy is not None:
                 break
 
         if best_decisions is not None:
-            return {"decisions": best_decisions}
+            result: Dict[str, Any] = {"decisions": best_decisions}
+            # Optional deep-mode extras ride alongside the decisions.
+            mood = extras.get("mood")
+            if isinstance(mood, dict):
+                result["mood"] = mood
+            lesson = str(extras.get("lesson", "")).strip()
+            if lesson:
+                result["lesson"] = lesson
+            return result
 
         # Salvage pass for TRUNCATED responses (max_tokens cut-off): the
         # wrapper {"decisions": [...]} cannot be parsed, but the individual
@@ -1109,6 +1439,50 @@ class ExternalAIAgent(BaseAgent):
             "AI response did not contain a valid JSON action object: "
             f"{response[:200]!r}"
         )
+
+    _MAX_LESSONS = 8
+
+    def _record_lesson(self, result: Dict[str, Any]) -> None:
+        """File the one-liner the model wrote for itself, if any."""
+        lesson = str(result.get("lesson", "")).strip() if isinstance(result, dict) else ""
+        if not lesson:
+            return
+        if lesson in self._lessons:
+            return
+        self._lessons.append(lesson)
+        if len(self._lessons) > self._MAX_LESSONS:
+            self._lessons = self._lessons[-self._MAX_LESSONS:]
+
+    def _record_position_plans(
+        self, observation: Dict[str, Any], result: Dict[str, Any]
+    ) -> None:
+        """Store any exit levels the model committed to this round.
+
+        A plan is dropped once the position is gone, so the agent is never
+        reminded about a stock it no longer holds.
+        """
+        decisions = result.get("decisions") if isinstance(result, dict) else None
+        if isinstance(decisions, list):
+            for d in decisions:
+                if not isinstance(d, dict):
+                    continue
+                sym = str(d.get("name") or d.get("symbol") or "").strip()
+                if not sym:
+                    continue
+                plan = {
+                    field: d[field]
+                    for field in ("stop_loss", "target")
+                    if d.get(field) is not None
+                }
+                if plan:
+                    self._position_plans[sym] = plan
+
+        # Clear plans for positions the agent no longer has.
+        holdings = observation.get("my_holdings")
+        if isinstance(holdings, dict):
+            for sym in list(self._position_plans):
+                if float(holdings.get(sym, 0) or 0) <= 0:
+                    self._position_plans.pop(sym, None)
 
     def _retry_with_escalation(
         self,
@@ -1275,6 +1649,9 @@ class ExternalAIAgent(BaseAgent):
             )
             if len(self._short_term_memory) > self.memory_window:
                 self._short_term_memory = self._short_term_memory[-self.memory_window:]
+
+        self._record_lesson(result)
+        self._record_position_plans(observation, result)
 
         self._last_action = result
         return result

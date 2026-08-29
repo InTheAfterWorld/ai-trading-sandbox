@@ -1,6 +1,5 @@
 """Regression tests for review findings M1-M5.
 
-M1  TraitAgent overrides respect the shared cash budget across stocks.
 M2  A single wealth definition; metrics delegate to evaluate_wealth_curve.
 M3  Fill indexes replace the quadratic trade_history rescans.
 M4  JSON-mode fallback only fires on an actual response_format rejection.
@@ -17,8 +16,6 @@ from ai_trading_society.agents.external_ai_agent import (
     _is_json_mode_rejection,
     _is_transient_error,
 )
-from ai_trading_society.agents.traits import TraitAgent
-from ai_trading_society.base_agent import BaseAgent
 from ai_trading_society.config import MarketConfig, StockSpec
 from ai_trading_society.market_env import MarketEnv
 from ai_trading_society.simulator import Simulator, evaluate_wealth_curve
@@ -26,19 +23,6 @@ from tests.conftest import ScriptedExternalAIAgent
 
 SYMS = ["S0", "S1", "S2", "S3", "S4"]
 RISING = [100, 101, 102, 103, 104, 105]
-
-
-class _HoldingBase(BaseAgent):
-    """Base agent that always holds, so only traits move the decisions."""
-
-    def act(self, observation):
-        return {
-            "decisions": [
-                {"name": s["name"], "action": "hold", "quantity": 0,
-                 "reasoning": "base hold"}
-                for s in observation["stocks"]
-            ]
-        }
 
 
 def _multi_stock_obs(cash=10000.0, price=100.0, holdings=0):
@@ -72,65 +56,6 @@ def _exc(name, status=None, message=""):
 class _FakeOpenAIModule(ModuleType):
     class BadRequestError(Exception):
         pass
-
-
-# ---------------------------------------------------------------------------
-# M1: trait overrides must fit inside the shared cash balance
-# ---------------------------------------------------------------------------
-class TestM1SharedCashBudget:
-    def test_fomo_across_stocks_does_not_overcommit_cash(self):
-        """FOMO buys 50% of cash per stock; 5 stocks must not intend 250%."""
-        cash = 10000.0
-        agent = TraitAgent(
-            _HoldingBase("fomo", cash=cash, holdings={s: 0.0 for s in SYMS}),
-            fomo=1.0,
-        )
-        result = agent.act(_multi_stock_obs(cash=cash))
-        intended = sum(
-            d["quantity"] * 100.0 for d in result["decisions"] if d["action"] == "buy"
-        )
-        assert intended <= cash, (
-            f"trait overrides intended ${intended:,.0f} on a ${cash:,.0f} account"
-        )
-
-    def test_every_stock_still_gets_an_allocation(self):
-        """The budget must be shared, not consumed entirely by the first stock."""
-        agent = TraitAgent(
-            _HoldingBase("fomo", cash=10000.0, holdings={s: 0.0 for s in SYMS}),
-            fomo=1.0,
-        )
-        result = agent.act(_multi_stock_obs())
-        buys = [d for d in result["decisions"] if d["action"] == "buy"]
-        assert len(buys) == len(SYMS), "each rising stock should still be bought"
-        assert all(d["quantity"] > 0 for d in buys), \
-            "no stock should be starved to zero by earlier stocks in the loop"
-
-    def test_no_overdraft_reaches_the_market(self):
-        """End to end: cash never goes negative for a FOMO agent."""
-        specs = [StockSpec(name=s, initial_price=100.0, initial_holdings=0)
-                 for s in SYMS]
-        config = MarketConfig(stocks=specs, event_probability_multiplier=0.0)
-        base = ScriptedExternalAIAgent("fomo", cash=10000.0, holdings=0, buy_prob=1.0)
-        agent = TraitAgent(base, fomo=1.0)
-        seller = ScriptedExternalAIAgent(
-            "seller", cash=0, holdings=500, sell_prob=1.0
-        )
-        env = MarketEnv(config, [agent, seller], seed=3)
-        for _ in range(5):
-            env.step()
-        assert env.agents["fomo"].cash >= 0
-        env.close()
-
-    def test_single_stock_behaviour_is_unchanged(self):
-        """A one-stock market sees the full balance, exactly as before."""
-        obs = _multi_stock_obs()
-        obs["stocks"] = obs["stocks"][:1]
-        obs["my_holdings"] = {"S0": 0}
-        agent = TraitAgent(
-            _HoldingBase("fomo", cash=10000.0, holdings={"S0": 0.0}), fomo=1.0
-        )
-        result = agent.act(obs)
-        assert result["decisions"][0]["quantity"] == int(10000.0 * 0.5 / 100.0)
 
 
 # ---------------------------------------------------------------------------

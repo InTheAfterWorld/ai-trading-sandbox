@@ -533,13 +533,8 @@ class Simulator:
         print(colorize("  Parameter updated.", Colors.GREEN))
 
     def _show_social(self) -> None:
-        """Show each agent's social relationships and personality traits."""
+        """Show each agent's social relationships, mood and dials."""
         from .agents.roster import resolve_social_map
-
-        trait_names = [
-            "panic", "greed", "fomo", "stubbornness",
-            "loss_aversion", "overconfidence", "regret_avoidance",
-        ]
 
         print(colorize("\n  Social Relationships:", Colors.BOLD))
         print(f"{'─'*64}")
@@ -549,12 +544,16 @@ class Simulator:
             rel = social.get(aid, {"idol": None, "friends": [], "enemies": []})
             personality = agent_personality(agent) or "none"
 
-            traits = []
-            for t in trait_names:
-                v = getattr(agent, t, None)
-                if v is not None and v > 0:
-                    traits.append(f"{t}={v:.1f}")
-            trait_str = ", ".join(traits) if traits else "no traits"
+            # Mood and dials exist only for deep-mode persona agents.
+            mood = getattr(agent, "mood", None) if getattr(agent, "deep", False) else None
+            mood_str = (
+                ", ".join(f"{k}={v:.1f}" for k, v in mood.items())
+                if mood else "simple mode (no mood)"
+            )
+            dials = getattr(agent, "dials", None) if getattr(agent, "deep", False) else None
+            dial_str = (
+                ", ".join(f"{k}={v:.0f}" for k, v in dials.items()) if dials else "-"
+            )
 
             idol = rel.get("idol") or "-"
             friends = ", ".join(rel.get("friends", [])) or "-"
@@ -564,7 +563,8 @@ class Simulator:
             print(colorize(f"      idol    : {idol}", Colors.DIM))
             print(colorize(f"      friends : {friends}", Colors.DIM))
             print(colorize(f"      enemies : {enemies}", Colors.DIM))
-            print(colorize(f"      traits  : {trait_str}", Colors.DIM))
+            print(colorize(f"      mood    : {mood_str}", Colors.DIM))
+            print(colorize(f"      dials   : {dial_str}", Colors.DIM))
         print(f"{'─'*64}")
 
     @staticmethod
@@ -699,11 +699,13 @@ class Simulator:
             stock_acts = actions.get(agent_id, {})
             # agent_actions is nested {sym: {action, ...}}; aggregate into a
             # dominant action + totals (same logic as the web UI).
+            # Each stock's reasoning is kept separate so it can be printed on
+            # its own line below, rather than joined into one long string.
+            per_stock_reasoning: List[tuple] = []
             if isinstance(stock_acts, dict) and stock_acts:
                 dominant_action, max_filled = "hold", 0
                 total_req = total_filled = 0
-                reasoning_parts = []
-                for sa in stock_acts.values():
+                for sym, sa in stock_acts.items():
                     if not isinstance(sa, dict):
                         continue
                     f = sa.get("filled_qty", 0)
@@ -713,19 +715,24 @@ class Simulator:
                         max_filled = f
                         dominant_action = sa.get("action", "hold")
                     if sa.get("reasoning"):
-                        reasoning_parts.append(
-                            f"{sa.get('symbol', '')}: {sa['reasoning']}"
-                        )
+                        per_stock_reasoning.append((
+                            sym,
+                            sa.get("action", "hold"),
+                            sa.get("filled_qty", 0),
+                            sa["reasoning"],
+                        ))
                 action = dominant_action
                 req = total_req
                 filled = total_filled
-                reasoning = " | ".join(reasoning_parts)
             else:
                 # Legacy flat structure fallback.
                 action = stock_acts.get("action", "hold")
                 req = stock_acts.get("requested_qty", 0)
                 filled = stock_acts.get("filled_qty", 0)
-                reasoning = stock_acts.get("reasoning", "")
+                if stock_acts.get("reasoning"):
+                    per_stock_reasoning.append(
+                        ("", action, filled, stock_acts["reasoning"])
+                    )
 
             h = agent.holdings if isinstance(agent.holdings, dict) else {}
             wealth = self.env.agent_wealth(agent)
@@ -798,12 +805,29 @@ class Simulator:
                 f"R:{ret_str}  d:{delta_str}  {grade_str}"
             )
 
-            # Display reasoning (truncated for readability)
-            if reasoning:
-                display_reasoning = reasoning[:80]
-                if len(reasoning) > 80:
-                    display_reasoning += "..."
-                print(colorize(f"    -> {display_reasoning}", Colors.DIM))
+            # Deep-mode persona agents carry a mood; show how it moved.
+            mood = getattr(agent, "mood", None) if getattr(agent, "deep", False) else None
+            if mood:
+                print(colorize(
+                    "    mood: conf {c:.0f} · stress {s:.0f} · frustr {f:.0f}".format(
+                        c=mood.get("confidence", 0.0),
+                        s=mood.get("stress", 0.0),
+                        f=mood.get("frustration", 0.0),
+                    ),
+                    Colors.DIM,
+                ))
+
+            # One line per stock, in full: the agent explained each position
+            # separately, so squashing them into one truncated string threw
+            # most of that away.
+            for sym, sym_action, sym_filled, sym_reasoning in per_stock_reasoning:
+                if sym:
+                    head = f"{sym} {sym_action.upper()}"
+                    if sym_filled:
+                        head += f" {sym_filled}"
+                    print(colorize(f"    -> {head}: {sym_reasoning}", Colors.DIM))
+                else:
+                    print(colorize(f"    -> {sym_reasoning}", Colors.DIM))
 
         # --- Round action summary (per-stock actions nested: {aid: {sym: ...}}) ---
         stock_acts = [

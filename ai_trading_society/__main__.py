@@ -39,6 +39,7 @@ def run_society_mode(
     model = model or cfg.get("model") or "gpt-4o"
     trader_configs = cfg.get("traders") or None
     steps = steps or cfg.get("steps") or 5
+    deep_persona = bool(cfg.get("deep_persona", False))
 
     # Parse multi-stock configuration (falls back to a single default stock).
     # Config entries use {"name", "price", "hold"} (see config_store); accept
@@ -73,7 +74,7 @@ def run_society_mode(
         price_sensitivity=0.02,
         max_price_change_ratio=0.10,
         event_probability_multiplier=1.5,
-        random_traits=True,
+        deep_persona=deep_persona,
         seed=seed,
         fee_rate=float(cfg.get("fee", 0.001)),
         slippage_rate=float(cfg.get("slip", 0.001)),
@@ -90,6 +91,9 @@ def run_society_mode(
         holdings=int(cfg.get("hold", 20)),
         stocks=stock_specs,
         include_player=cfg.get("player_participates", True) is not False,
+        deep_persona=deep_persona,
+        mood_max_step=config.mood_max_step,
+        mood_intensity=config.mood_intensity,
     )
     env = MarketEnv(config, agents, seed=seed)
     # Resolve social relationships (idol/friends/enemies) so herding works in
