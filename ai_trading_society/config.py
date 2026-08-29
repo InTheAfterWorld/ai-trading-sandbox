@@ -100,10 +100,12 @@ class MarketConfig:
 
     mood_max_step: float = 3.0
     """Largest change allowed on any mood axis in one round, so a single
-    round cannot swing a personality end to end."""
+    round cannot swing a personality end to end. Caps both the rule-based
+    move and the model's reported adjustment."""
 
     mood_intensity: float = 1.0
-    """Scales the deterministic fallback mood formula."""
+    """Scales how strongly round events move mood (recovery toward the
+    baseline is unaffected)."""
 
     # --- Social influence ---
     social_influence: float = 0.0

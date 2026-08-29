@@ -11,6 +11,8 @@ is why a decision can never contradict the reasoning printed beside it.
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..base_agent import BaseAgent
+from .mood import MOOD_AXES as MOOD_AXES  # re-exported for existing importers
+from .mood import objective_pressure, settle_mood
 
 # Fixed preamble: pulls the model out of calm-optimizer mode and ties the
 # decision to the reasoning. Prepended to every persona, both depths.
@@ -27,8 +29,8 @@ _IN_CHARACTER_CHECK = (
     "explain a buy and then sell."
 )
 
-# The three mood axes, 0-10.
-MOOD_AXES = ("confidence", "stress", "frustration")
+# The three mood axes (0-10) and the rule-based mood dynamics live in
+# ``mood``; ``MOOD_AXES`` is re-exported here for existing importers.
 
 # The seven per-agent sensitivity dials, 0-10. They shape how fast mood
 # moves and add a sentence to the disposition; they never touch a decision.
@@ -330,7 +332,11 @@ class TraitAgent(BaseAgent):
     mood_max_step : float
         Largest per-round change allowed on any mood axis.
     mood_intensity : float
-        Scales the deterministic fallback mood formula.
+        Scales how strongly round events move mood.
+    use_reported_mood : bool
+        When True (default) the model's reported mood is used as a bounded
+        adjustment around the rule-based mood; False gives a fully
+        deterministic formula-only run.
     """
 
     # Temporary balances stored via the cash/holdings setters while
@@ -347,6 +353,7 @@ class TraitAgent(BaseAgent):
         dials: Optional[Dict[str, float]] = None,
         mood_max_step: float = 3.0,
         mood_intensity: float = 1.0,
+        use_reported_mood: bool = True,
     ):
         # Copy base agent properties for BaseAgent.__init__
         super().__init__(base_agent.agent_id, base_agent.cash, base_agent.holdings)
@@ -372,12 +379,14 @@ class TraitAgent(BaseAgent):
         self.mood: Dict[str, float] = preset_mood(personality_name)
         self.mood_max_step = float(mood_max_step)
         self.mood_intensity = float(mood_intensity)
+        self.use_reported_mood = bool(use_reported_mood)
         self._mood_baseline: Dict[str, float] = preset_mood(personality_name)
 
         # Wealth / streak tracking feeding the mood engine.
         self._initial_wealth: float = 0.0
         self._peak_wealth: Optional[float] = None
         self._prev_wealth: Optional[float] = None
+        self._prev_rank: Optional[int] = None
         self._loss_streak: int = 0
         self._win_streak: int = 0
         self._first_act: bool = True
@@ -416,123 +425,9 @@ class TraitAgent(BaseAgent):
             object.__setattr__(self, "_holdings_tmp", value)
 
     # ------------------------------------------------------------------
-    # Mood engine (deep mode only) -- shapes the prompt, never the decision
+    # Mood engine (deep mode only) -- shapes the prompt, never the decision.
+    # The dynamics live in agents/mood.py; this class only carries the state.
     # ------------------------------------------------------------------
-
-    def _objective_pressure(
-        self, observation: Dict[str, Any]
-    ) -> Tuple[str, Dict[str, float]]:
-        """Describe what just happened to this agent, in plain language.
-
-        Returns the sentence handed to the model plus the numbers the
-        fallback formula needs.
-        """
-        wealth = float(observation.get("my_wealth", 0.0) or 0.0)
-        peak = self._peak_wealth if self._peak_wealth else wealth
-        drawdown = (peak - wealth) / peak if peak > 0 else 0.0
-        prev = self._prev_wealth
-        round_return = ((wealth - prev) / prev) if (prev and prev > 0) else 0.0
-
-        standing = observation.get("standing") or {}
-        rival_gap = 0.0
-        try:
-            gap = standing.get("gap_to_leader_pct")
-            if gap is not None:
-                rival_gap = max(0.0, float(gap)) / 100.0
-        except (TypeError, ValueError):
-            rival_gap = 0.0
-
-        metrics = {
-            "drawdown": drawdown,
-            "round_return": round_return,
-            "rival_gap": rival_gap,
-            "loss_streak": float(self._loss_streak),
-            "win_streak": float(self._win_streak),
-        }
-
-        bits = []
-        if prev:
-            direction = "up" if round_return >= 0 else "down"
-            bits.append(f"Last round you were {direction} {abs(round_return) * 100:.1f}%")
-        if drawdown > 0.01:
-            bits.append(f"you are {drawdown * 100:.1f}% below your peak")
-        if self._loss_streak >= 2:
-            bits.append(f"that is {self._loss_streak} losing rounds in a row")
-        elif self._win_streak >= 2:
-            bits.append(f"that is {self._win_streak} winning rounds in a row")
-        pressure = ("; ".join(bits) + ".") if bits else ""
-        return pressure, metrics
-
-    def _formula_mood(self, metrics: Dict[str, float]) -> Dict[str, float]:
-        """Deterministic mood update, used when the model reports none.
-
-        Dials scale the gains and the decay: loss_sensitivity drives how
-        hard a drawdown bites, resilience how fast it fades, envy how much
-        a rival being ahead grates.
-        """
-        loss_gain = 0.2 + self.dials.get("loss_sensitivity", 5.0) / 10.0
-        decay = 0.1 + self.dials.get("resilience", 5.0) / 20.0
-        envy_gain = self.dials.get("envy", 5.0) / 10.0
-        risk = self.dials.get("risk_appetite", 5.0) / 10.0
-        scale = self.mood_intensity
-
-        base = self._mood_baseline
-        out = dict(self.mood)
-
-        stress = out["stress"]
-        stress += scale * (
-            loss_gain * metrics["drawdown"] * 10.0
-            - decay * (stress - base["stress"])
-        )
-        out["stress"] = _clamp(stress)
-
-        confidence = out["confidence"]
-        confidence += scale * (
-            (0.5 + risk) * metrics["round_return"] * 10.0
-            - decay * (confidence - base["confidence"])
-        )
-        out["confidence"] = _clamp(confidence)
-
-        frustration = out["frustration"]
-        frustration += scale * (
-            envy_gain * metrics["rival_gap"] * 10.0
-            + 0.4 * metrics["loss_streak"]
-            - decay * (frustration - base["frustration"])
-        )
-        out["frustration"] = _clamp(frustration)
-        return out
-
-    def _settle_mood(
-        self, reported: Any, metrics: Dict[str, float]
-    ) -> Dict[str, float]:
-        """Adopt the model's own mood when usable, else the formula.
-
-        A reported value is clamped to 0-10 and to ``mood_max_step`` from
-        the previous value, so one round can never swing a personality.
-        """
-        settled: Dict[str, float] = {}
-        usable = isinstance(reported, dict)
-        if usable:
-            for axis in MOOD_AXES:
-                raw = reported.get(axis)
-                if raw is None:
-                    usable = False
-                    break
-                try:
-                    value = float(raw)
-                except (TypeError, ValueError):
-                    usable = False
-                    break
-                if value != value or value in (float("inf"), float("-inf")):
-                    usable = False
-                    break
-                prev = self.mood[axis]
-                settled[axis] = _clamp(
-                    max(prev - self.mood_max_step,
-                        min(prev + self.mood_max_step, value))
-                )
-        self.mood = settled if usable else self._formula_mood(metrics)
-        return self.mood
 
     def act(self, observation: Dict[str, Any]) -> Dict[str, Any]:
         """Return the base agent's decision, unmodified.
@@ -557,7 +452,14 @@ class TraitAgent(BaseAgent):
             self._prev_wealth = current_wealth
             return self.base_agent.act(observation)
 
-        pressure, metrics = self._objective_pressure(observation)
+        pressure, metrics = objective_pressure(
+            observation,
+            peak_wealth=self._peak_wealth,
+            prev_wealth=self._prev_wealth,
+            prev_rank=self._prev_rank,
+            loss_streak=self._loss_streak,
+            win_streak=self._win_streak,
+        )
         observation["persona"] = {
             "name": self.agent_id,
             "disposition": self.disposition,
@@ -569,8 +471,15 @@ class TraitAgent(BaseAgent):
 
         result = self.base_agent.act(observation)
 
-        self._settle_mood(
-            result.get("mood") if isinstance(result, dict) else None, metrics
+        self.mood = settle_mood(
+            self.mood,
+            self._mood_baseline,
+            self.dials,
+            result.get("mood") if isinstance(result, dict) else None,
+            metrics,
+            use_reported_mood=self.use_reported_mood,
+            mood_intensity=self.mood_intensity,
+            mood_max_step=self.mood_max_step,
         )
         if isinstance(result, dict):
             result["mood"] = dict(self.mood)
@@ -584,6 +493,7 @@ class TraitAgent(BaseAgent):
                 self._win_streak += 1
                 self._loss_streak = 0
         self._prev_wealth = current_wealth
+        self._prev_rank = metrics.get("rank") or self._prev_rank
         return result
 
     @property
@@ -613,6 +523,7 @@ def create_personality_agent(
     persona: str = "",
     mood_max_step: float = 3.0,
     mood_intensity: float = 1.0,
+    use_reported_mood: bool = True,
 ) -> TraitAgent:
     """
     Create an agent whose system prompt carries a named personality.
@@ -629,10 +540,14 @@ def create_personality_agent(
         text, and ask for longer, in-character reasoning. Default False.
     dials : dict, optional
         Per-trader dial overrides merged over the preset profile.
-    trait_notes : str, optional
+    trait_notes : str
         Extra character notes appended to the disposition (deep mode).
-    persona : str, optional
+    persona : str
         Replaces the preset disposition paragraph entirely (deep mode).
+    use_reported_mood : bool
+        When True (default) the model's reported mood is a bounded
+        adjustment around the rule-based mood; False ignores it entirely
+        (deterministic mood).
 
     Returns
     -------
@@ -665,6 +580,7 @@ def create_personality_agent(
         dials=resolved_dials,
         mood_max_step=mood_max_step,
         mood_intensity=mood_intensity,
+        use_reported_mood=use_reported_mood,
     )
 
 

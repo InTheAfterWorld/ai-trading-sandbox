@@ -1,8 +1,8 @@
 """Phase 2B: the 3-axis mood engine.
 
-Hybrid: the model reports its own mood, Python clamps it, and a
-deterministic formula fills in when the model reports nothing usable.
-Mood only ever shapes the prompt -- never the decision.
+Controlled hybrid: deterministic event rules always run, and the model's
+reported mood is a bounded adjustment around the rule value (never a
+reset). Mood only ever shapes the prompt -- never the decision.
 """
 
 import pytest
@@ -73,7 +73,7 @@ class TestSeeding:
             assert all(0 <= v <= 10 for v in preset_mood(personality).values())
 
 
-class TestReportedMoodIsClamped:
+class TestReportedMoodIsBounded:
     def test_reported_mood_is_adopted(self):
         agent = _agent("balanced")
         agent.base_agent.reported = {
@@ -82,17 +82,19 @@ class TestReportedMoodIsClamped:
         agent.act(_obs())
         assert agent.mood["stress"] == 4.0
 
-    def test_clamped_to_zero_ten(self):
+    def test_reported_is_clamped_to_the_rule_value(self):
         agent = _agent("balanced")
-        agent.mood_max_step = 100.0     # isolate the 0-10 clamp
+        agent.mood_max_step = 100.0     # isolate the rule-window clamp
         agent.base_agent.reported = {
             "confidence": 99.0, "stress": -20.0, "frustration": 5.0
         }
-        agent.act(_obs())
-        assert agent.mood["confidence"] == 10.0
-        assert agent.mood["stress"] == 0.0
+        agent.act(_obs())               # flat round -> rules return baseline
+        rule = preset_mood("balanced")
+        for axis in MOOD_AXES:
+            assert rule[axis] - 1.5 <= agent.mood[axis] <= rule[axis] + 1.5
+            assert 0.0 <= agent.mood[axis] <= 10.0
 
-    def test_clamped_to_max_step(self):
+    def test_reported_cannot_leave_prev_max_step(self):
         agent = _agent("balanced")
         start = dict(agent.mood)
         agent.base_agent.reported = {
@@ -101,6 +103,7 @@ class TestReportedMoodIsClamped:
         agent.act(_obs())
         for axis in MOOD_AXES:
             assert agent.mood[axis] <= start[axis] + agent.mood_max_step + 1e-9
+            assert agent.mood[axis] >= start[axis] - agent.mood_max_step - 1e-9
 
     @pytest.mark.parametrize("bad", [
         {"confidence": 5.0},                                  # incomplete
@@ -117,7 +120,7 @@ class TestReportedMoodIsClamped:
         assert all(0 <= v <= 10 for v in agent.mood.values())
 
 
-class TestFormulaFallback:
+class TestRuleEngine:
     def test_drawdown_raises_stress(self):
         agent = _agent("balanced")
         agent.act(_obs(wealth=12000.0))          # sets the peak

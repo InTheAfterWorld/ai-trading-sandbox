@@ -217,7 +217,7 @@ Saved to `user_config.json`, shared by the web UI and CLI:
 
 In `MarketConfig`, deep mode has two tuning knobs: `mood_max_step` (how far a
 mood can move in one round, default 3) and `mood_intensity` (how strongly the
-fallback mood formula reacts, default 1). The synthetic pre-history length is
+mood events react, default 1). The synthetic pre-history length is
 `history_backfill_steps` (default 30; set 0 to disable). Stock `sector`/`blurb` strings go straight into
 each agent's observation and prompt. Set `parallel_agents=False` to collect
 agent decisions strictly one-by-one.
@@ -242,8 +242,10 @@ Tick **Deep personality simulation** on the homepage (or pass
   `herd_pull`, `patience`, `resilience`, `envy`, `conviction`. Each preset
   ships a profile; adjust them per trader with the sliders.
 - **A mood** — `confidence`, `stress`, `frustration` (0–10) — that starts from
-  the preset and shifts each round with how the trader did. The model reports
-  its own mood and the sandbox limits how far it can jump.
+  the preset and shifts each round on plain events (gains, losses, streaks,
+  volatility, rank moves, rivals), then drifts back toward the baseline. The
+  model still reports its own mood, but only as a small bounded adjustment
+  around the rules.
 - **Custom character text**: `trait_notes` is added to the preset, `persona`
   replaces it.
 - **More context in the prompt**: where the trader ranks, how the rest of the

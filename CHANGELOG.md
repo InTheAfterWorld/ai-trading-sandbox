@@ -14,8 +14,11 @@ still contain breaking changes).
   - seven sensitivity dials — `risk_appetite`, `loss_sensitivity`, `herd_pull`,
     `patience`, `resilience`, `envy`, `conviction` — with a per-preset profile
     and per-trader sliders;
-  - an evolving mood (`confidence` / `stress` / `frustration`, 0–10) that the
-    model reports and Python clamps, with a deterministic fallback formula;
+  - an evolving mood (`confidence` / `stress` / `frustration`, 0–10) that
+    moves on round-by-round events (gains, losses, streaks, volatility, rank
+    moves, rival performance) with gradual recovery toward the preset
+    baseline; the model's self-report is a bounded adjustment around the
+    rules, never a reset;
   - optional free-text character: `trait_notes` (added to the preset) and
     `persona` (replaces it);
   - richer prompt context: how the trader ranks against the others, how the
