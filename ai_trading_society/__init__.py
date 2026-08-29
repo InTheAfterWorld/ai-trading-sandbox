@@ -27,7 +27,7 @@ from .visualization import (
     plot_wealth_timeline,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 __all__ = [
     # Core
     "MarketConfig",

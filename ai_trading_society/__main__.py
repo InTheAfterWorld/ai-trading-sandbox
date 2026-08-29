@@ -1,7 +1,7 @@
 ﻿"""
 Entry point: python -m ai_trading_society
 
-Runs demo simulations with AI agents in unified society mode.
+Runs simulations with AI agents that trade on personality and live market events.
 
 The CLI reads the same configuration (user_config.json) that the web
 homepage saves, so a simulation configured in the browser runs
@@ -28,10 +28,10 @@ def run_society_mode(
     api_key: Optional[str] = None,
     steps: Optional[int] = None,
 ):
-    """Run unified society mode simulation (events + traits always on)."""
+    """Run a simulation: AI traders act on their personality plus market events."""
     print("\n" + "=" * 60)
     print("  AI TRADING SANDBOX")
-    print("  AI agents trade with events and personality traits")
+    print("  AI traders act on personality and live market events")
     print("=" * 60)
 
     cfg = load_config()

@@ -35,7 +35,7 @@ def test_code_version_retrieval():
     ver = get_code_version()
     assert isinstance(ver, dict)
     assert "package_version" in ver
-    assert ver["package_version"] == "0.2.0"
+    assert ver["package_version"] == "0.3.0"
     assert "git_commit" in ver
     assert "git_dirty" in ver
 

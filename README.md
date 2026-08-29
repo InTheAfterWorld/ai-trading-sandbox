@@ -8,7 +8,7 @@ A multi-agent stock market sandbox where autonomous LLM traders with distinct pe
 
 <img alt="License" src="https://img.shields.io/badge/license-MIT-blue">
 <img alt="Python" src="https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue">
-<img alt="Version" src="https://img.shields.io/badge/version-0.2.0-blue">
+<img alt="Version" src="https://img.shields.io/badge/version-0.3.0-blue">
 <img alt="Language" src="https://img.shields.io/badge/language-Python-3776AB">
 
 </div>
@@ -32,6 +32,7 @@ A multi-agent stock market sandbox where autonomous LLM traders with distinct pe
   - [Keyboard shortcuts (web)](#keyboard-shortcuts-web)
 - [Configuration](#configuration)
 - [Personality Presets](#personality-presets)
+- [Deep Personality Mode](#deep-personality-mode)
 - [As a Library](#as-a-library)
 - [API Reference](#api-reference)
 - [Project Structure](#project-structure)
@@ -227,6 +228,32 @@ agent decisions strictly one-by-one.
 `fomo_driven` · `stubborn` · `emotional` — assigned per trader in the web UI,
 or via `create_personality_agent(base_agent, personality=..., deep=False)`.
 Pass `deep=True` for the mood + dials layer.
+
+## Deep Personality Mode
+
+By default each trader carries a one-line character in its prompt plus a lean
+set of context. This is fast and cheap, and every trade still follows the
+model's own stated reasoning.
+
+Tick **Deep personality simulation** on the homepage (or pass
+`deep_persona=True`) and each trader also gets:
+
+- **Seven sensitivity dials** (0–10): `risk_appetite`, `loss_sensitivity`,
+  `herd_pull`, `patience`, `resilience`, `envy`, `conviction`. Each preset
+  ships a profile; adjust them per trader with the sliders.
+- **A mood** — `confidence`, `stress`, `frustration` (0–10) — that starts from
+  the preset and shifts each round with how the trader did. The model reports
+  its own mood and the sandbox limits how far it can jump.
+- **Custom character text**: `trait_notes` is added to the preset, `persona`
+  replaces it.
+- **More context in the prompt**: where the trader ranks, how the rest of the
+  floor behaved, what rivals said, and which moves it did and didn't catch.
+- **Self-written notes**: the model may keep a short lesson and set stop-loss /
+  target prices. These come back in later prompts as reminders — nothing acts
+  on them automatically.
+
+Mood is model-reported, so deep runs are not bit-for-bit reproducible, and the
+longer prompts cost more tokens. Pair it with a fast model.
 
 ## As a Library
 
