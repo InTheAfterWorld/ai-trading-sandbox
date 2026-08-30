@@ -1,19 +1,19 @@
 {
-  "base_point": 0.5,
-  "normal_scale": 0.5,
-  "score": 4.5115502989853615,
+  "base_point": 0.4,
+  "normal_scale": 1.0,
+  "score": 0.0,
   "per_axis": {
     "confidence": {
-      "p10": 2.97,
-      "p90": 10.0
+      "p10": 2.503,
+      "p90": 7.851
     },
     "stress": {
-      "p10": 1.251,
-      "p90": 7.649
+      "p10": 2.787,
+      "p90": 7.004
     },
     "frustration": {
-      "p10": 0.237,
-      "p90": 7.169
+      "p10": 2.0,
+      "p90": 6.959
     }
   },
   "note": "Advisory only: copy these into ai_trading_society/agents/mood.py by hand; mood.py stays the single source of truth."
