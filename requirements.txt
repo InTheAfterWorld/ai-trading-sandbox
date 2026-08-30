@@ -3,6 +3,9 @@
 # Web dashboard (python run.py) - the default entry point.
 flask>=3.0
 
+# Production WSGI server for Render / other hosted deployments.
+gunicorn>=22.0
+
 # Optional extras are declared in pyproject.toml:
 #   pip install -e ".[viz]"   # matplotlib charts
 #   pip install -e ".[config]"  # YAML scenario configs
