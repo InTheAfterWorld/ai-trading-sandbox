@@ -3,5 +3,5 @@ services:
     name: ai-trading-sandbox
     runtime: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 300 render_app:app
+    startCommand: gunicorn --chdir /opt/render/project/src --bind 0.0.0.0:$PORT --workers 1 --timeout 300 ai_trading_society.web.render_app:app
     healthCheckPath: /healthz
