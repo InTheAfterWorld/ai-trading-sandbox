@@ -14,21 +14,29 @@ from ai_trading_society.web.app import app
 
 # The Render service serves the UI and API from the same origin, so CORS is
 # normally unnecessary. If the UI is hosted separately, set
-# ATS_CORS_ORIGINS to a comma-separated list of exact origins, e.g.
-# https://my-frontend.example.com,https://www.example.com
+# ATS_CORS_ORIGINS to a comma-separated list of exact origins.
 _CORS_ORIGINS = {
     origin.strip().rstrip("/")
     for origin in os.environ.get("ATS_CORS_ORIGINS", "").split(",")
     if origin.strip()
 }
 
-# The local version of app.py intentionally has strict localhost-only Host and
-# Origin checks because it can expose saved API keys. Render is a separate,
-# web-only deployment, so remove those local guards here.
+# The local version of app.py has strict localhost-only Host/Origin guards.
+# The Render entry point is intentionally web-only, so replace those guards
+# with the deployment policy below.
 app.before_request_funcs[None] = []
 
-# Never expose stored API keys through GET /api/config in the public deployment.
+# Never expose stored API keys through GET /api/config in the public service.
 os.environ["ATS_REDACT_CONFIG"] = "1"
+
+# Flask's default session cookie is fine for same-origin Render traffic. These
+# settings also make an explicitly configured external frontend work with
+# credentialed CORS requests.
+app.config.update(
+    SESSION_COOKIE_SECURE=True,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="None",
+)
 
 
 @app.after_request
@@ -51,7 +59,4 @@ def healthz():
 
 
 if __name__ == "__main__":
-    # Local invocation of this file is not the supported workflow; Render
-    # starts it through gunicorn. This fallback is useful for a quick smoke
-    # test without restoring the old local CLI entry points.
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "10000")))
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "10000")), debug=False)
