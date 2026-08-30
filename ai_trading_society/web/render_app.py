@@ -7,7 +7,6 @@ Local development continues to use ``ai_trading_society.web.app:app``.
 Render uses ``ai_trading_society.web.render_app:app``.
 """
 
-import base64
 import hmac
 import os
 
@@ -30,8 +29,6 @@ _web_password = os.environ.get("ATS_WEB_PASSWORD", "").strip()
 def _authorized() -> bool:
     """Validate HTTP Basic Auth using a shared deployment password."""
     if not _web_password:
-        # Deliberately fail closed on a public deployment if the password was
-        # not configured. Local runs do not use this wrapper.
         return False
     auth = request.authorization
     if auth is None or not auth.password:
