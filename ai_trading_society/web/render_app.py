@@ -11,14 +11,26 @@ import hmac
 import os
 
 from flask import Response, jsonify, request
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from ai_trading_society.web import app as _app_module
 
 app = _app_module.app
 
-# The existing app intentionally protects against DNS rebinding with a local
-# Host allowlist. Render provides RENDER_EXTERNAL_HOSTNAME automatically;
-# include it here so the hosted copy works without changing local defaults.
+# Render sits behind a reverse proxy. Without ProxyFix Flask sees the internal
+# HTTP/127.0.0.1 host instead of the public https://<service>.onrender.com host.
+# That breaks both Host validation and the app's same-origin CSRF check.
+# Trust exactly one proxy hop: Render's edge proxy.
+app.wsgi_app = ProxyFix(
+    app.wsgi_app,
+    x_for=1,
+    x_proto=1,
+    x_host=1,
+    x_port=1,
+)
+
+# Render provides RENDER_EXTERNAL_HOSTNAME automatically. Include it in the
+# existing app allowlist so the hosted request passes Host validation.
 _render_hostname = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "").strip().lower()
 if _render_hostname:
     _app_module._ALLOWED_HOSTS.add(_render_hostname)
