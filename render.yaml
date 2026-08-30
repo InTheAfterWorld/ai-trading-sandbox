@@ -5,8 +5,8 @@ services:
     plan: free
     branch: render-web
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn -w 1 --threads 8 --timeout 180 -b 0.0.0.0:$PORT ai_trading_society.web.app:app
-    healthCheckPath: /
+    startCommand: gunicorn -w 1 --threads 8 --timeout 180 -b 0.0.0.0:$PORT ai_trading_society.web.render_app:app
+    healthCheckPath: /health
     envVars:
       - key: FLASK_SECRET_KEY
         generateValue: true
