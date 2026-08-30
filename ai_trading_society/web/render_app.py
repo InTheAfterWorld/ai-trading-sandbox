@@ -10,7 +10,7 @@ Render uses ``ai_trading_society.web.render_app:app``.
 import hmac
 import os
 
-from flask import Response, request
+from flask import Response, jsonify, request
 
 from ai_trading_society.web import app as _app_module
 
@@ -26,6 +26,12 @@ if _render_hostname:
 _web_password = os.environ.get("ATS_WEB_PASSWORD", "").strip()
 
 
+@app.route("/health", methods=["GET"])
+def health():
+    """Unauthenticated health endpoint for Render's health checker."""
+    return jsonify({"ok": True})
+
+
 def _authorized() -> bool:
     """Validate HTTP Basic Auth using a shared deployment password."""
     if not _web_password:
@@ -39,6 +45,8 @@ def _authorized() -> bool:
 @app.before_request
 def require_web_password():
     """Require the shared password before any hosted request is processed."""
+    if request.path == "/health":
+        return None
     if _authorized():
         return None
     return Response(
