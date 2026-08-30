@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: ai-trading-sandbox-web
+    runtime: python
+    plan: free
+    branch: render-web
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn -w 1 --threads 8 --timeout 180 -b 0.0.0.0:$PORT ai_trading_society.web.app:app
+    healthCheckPath: /
+    envVars:
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: ATS_ALLOWED_HOSTS
+        sync: false
+      - key: ATS_WEB_PASSWORD
+        sync: false
+      - key: ATS_REDACT_CONFIG
+        value: "1"
