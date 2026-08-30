@@ -16,6 +16,7 @@ import re
 import sys
 import uuid
 from collections import OrderedDict
+from typing import Any
 
 try:
     from flask import Flask, jsonify, render_template, request, send_file
@@ -489,7 +490,7 @@ def api_start():
                 continue
             seen.add(name)
             try:
-                s_price = float(s.get("price", s.get("initial_price", price)))
+                s_price = float(s.get("price") or s.get("initial_price") or price)
             except (TypeError, ValueError):
                 s_price = price
             try:
@@ -881,7 +882,7 @@ def api_results():
     avg_vol = sum(env.volume_history) / len(env.volume_history) if env.volume_history else 0
 
     # Build wealth history for chart.
-    wealth_history = {}
+    wealth_history: dict[str, list[dict[str, float]]] = {}
     for aid in env.agents:
         wealth_history[aid] = []
     for snapshot in sim.state_history:
@@ -983,7 +984,7 @@ def api_report_export():
         wealth_history[aid] = pts
 
     # Decision log per agent: one row per round.
-    agent_logs = {}
+    agent_logs: dict[str, list[dict[str, Any]]] = {}
     for snap in state.get("history", []):
         for a in snap.get("agents", []):
             agent_logs.setdefault(a.get("id", "?"), []).append({
