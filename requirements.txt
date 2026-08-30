@@ -1,11 +1,5 @@
-# Core simulation: no external dependencies.
-
-# Web dashboard (python run.py) - the default entry point.
+# Web deployment dependencies.
 flask>=3.0
-
-# Optional extras are declared in pyproject.toml:
-#   pip install -e ".[viz]"   # matplotlib charts
-#   pip install -e ".[config]"  # YAML scenario configs
-#   pip install -e ".[ai]"    # OpenAI / Anthropic / Gemini SDKs
-#   pip install -e ".[dev]"   # pytest, ruff, mypy
-#   pip install -e ".[all]"   # everything
+# Render production server. Use one worker because simulation sessions are
+# intentionally kept in process memory.
+gunicorn>=23.0
