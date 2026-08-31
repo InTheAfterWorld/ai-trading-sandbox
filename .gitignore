@@ -59,6 +59,7 @@ runs/
 
 guichange.md
 GITHUB_SETUP_GUIDE.md
-docs/
 
 templates/templates_old
+
+user_facing_text.md

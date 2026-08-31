@@ -409,13 +409,11 @@ td.reason{font-size:11px;color:var(--text-dim);font-style:italic;line-height:1.4
   display:none;white-space:nowrap;
 }
 .wait-window.show.auto-running .ww-stop{display:inline-block;}
-/* Full-screen transparent click-blocker shown while AI is thinking. */
-.think-overlay{
-  position:fixed;inset:0;z-index:240;display:none;
-  /* transparent but still catches pointer events */
-  background:rgba(11,14,20,0);
+/* Full-screen click-blocker removed: while AI is thinking the page stays
+   interactive; agent-affecting controls (chat) are disabled via body.thinking. */
+body.thinking .social-fab{
+  opacity:.45;pointer-events:none;cursor:not-allowed;
 }
-.think-overlay.show{display:block;}
 .ww-title{font-size:13px;font-weight:700;}
 .ww-sub{font-size:11px;color:var(--text-dim);margin-top:2px;}
 .spinner{width:22px;height:22px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--purple);animation:spin .8s linear infinite;flex-shrink:0;}
@@ -705,6 +703,23 @@ body.dark .guide-tag{background:#f0f3f9;}
 }
 .pf-queued.show{display:flex;}
 .pf-note{font-size:10.5px;color:var(--text-dim);margin-top:9px;font-style:italic;}
+.pf-stock-select{
+  flex:1;min-width:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;
+  padding:7px 9px;color:var(--text);font-size:12px;font-weight:700;outline:none;font-family:inherit;cursor:pointer;
+}
+.pf-stock-select:focus{border-color:var(--purple);}
+.pf-holdings{margin:2px 0 12px;border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+.pf-h-row{
+  display:flex;align-items:center;gap:8px;padding:6px 10px;font-size:11px;
+  border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;
+}
+.pf-h-row:last-child{border-bottom:none;}
+.pf-h-row:hover,.pf-h-row.active{background:var(--bg-secondary);}
+.pf-h-row.active{box-shadow:inset 3px 0 0 var(--purple);}
+.pf-h-name{font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pf-h-qty{color:var(--text-dim);white-space:nowrap;}
+.pf-h-val{font-weight:700;white-space:nowrap;}
+.pf-h-empty{padding:8px 10px;font-size:10.5px;color:var(--text-dim);font-style:italic;}
 
 /* ---------- Event tab strip + full timeline ---------- */
 .tab-row{display:flex;gap:6px;margin-bottom:10px;}
@@ -843,31 +858,6 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
         <div class="candle-tip" id="candleTip"></div>
       </div>
     </div>
-    <!-- Player trading panel -->
-    <div class="card" id="portfolioCard">
-      <div class="card-title">💼 Your Portfolio <span class="badge" id="pfStockBadge">Stock 1</span></div>
-      <div class="pf-grid">
-        <div class="pf-cell"><span class="pf-label">Cash</span><span class="pf-val" id="pfCash">—</span></div>
-        <div class="pf-cell"><span class="pf-label">Shares</span><span class="pf-val" id="pfShares">—</span></div>
-        <div class="pf-cell"><span class="pf-label">Wealth</span><span class="pf-val" id="pfWealth">—</span></div>
-        <div class="pf-cell"><span class="pf-label">Return</span><span class="pf-val" id="pfReturn">—</span></div>
-      </div>
-      <div class="pf-actions">
-        <input class="pf-qty" id="pfQty" type="number" min="0" step="1" placeholder="Qty" title="Number of shares">
-        <div class="pf-side" title="Quick-fill percentages use this side (buying power or holdings)">
-          <button type="button" id="pfSideBuy" class="active" onclick="setPfSide('buy')">Buy side</button>
-          <button type="button" id="pfSideSell" onclick="setPfSide('sell')">Sell side</button>
-        </div>
-        <button class="pf-chip" onclick="fillPfQty(0.25)">25%</button>
-        <button class="pf-chip" onclick="fillPfQty(0.5)">50%</button>
-        <button class="pf-chip" onclick="fillPfQty(1)">Max</button>
-        <span style="flex:1"></span>
-        <button class="btn btn-sm btn-buy" id="pfBuyBtn" onclick="submitPlayerAction('buy')">▲ Buy</button>
-        <button class="btn btn-sm btn-sell" id="pfSellBtn" onclick="submitPlayerAction('sell')">▼ Sell</button>
-      </div>
-      <div class="pf-queued" id="pfQueued"></div>
-      <div class="pf-note">Orders are queued and execute on the next round · fees &amp; slippage apply.</div>
-    </div>
     <div class="card" id="agentsCard">
       <div class="card-title">
         Agents <span class="badge" id="agentCount">0</span>
@@ -910,6 +900,32 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
         </div>
       </div>
     </div>
+    <!-- Player trading panel (multi-stock) -->
+    <div class="card" id="portfolioCard">
+      <div class="card-title">💼 Your Portfolio <span class="badge" id="pfStockBadge">Stock 1</span></div>
+      <div class="pf-grid">
+        <div class="pf-cell"><span class="pf-label">Cash</span><span class="pf-val" id="pfCash">—</span></div>
+        <div class="pf-cell"><span class="pf-label">Wealth</span><span class="pf-val" id="pfWealth">—</span></div>
+        <div class="pf-cell"><span class="pf-label">Return</span><span class="pf-val" id="pfReturn">—</span></div>
+      </div>
+      <div class="pf-holdings" id="pfHoldings"></div>
+      <div class="pf-actions">
+        <select class="pf-stock-select" id="pfStock" title="Stock to trade" onchange="onPfStockChange()"></select>
+        <input class="pf-qty" id="pfQty" type="number" min="0" step="1" placeholder="Qty" title="Number of shares">
+        <div class="pf-side" title="Quick-fill percentages use this side (buying power or holdings)">
+          <button type="button" id="pfSideBuy" class="active" onclick="setPfSide('buy')">Buy side</button>
+          <button type="button" id="pfSideSell" onclick="setPfSide('sell')">Sell side</button>
+        </div>
+        <button class="pf-chip" onclick="fillPfQty(0.25)">25%</button>
+        <button class="pf-chip" onclick="fillPfQty(0.5)">50%</button>
+        <button class="pf-chip" onclick="fillPfQty(1)">Max</button>
+        <span style="flex:1"></span>
+        <button class="btn btn-sm btn-buy" id="pfBuyBtn" onclick="submitPlayerAction('buy')">▲ Buy</button>
+        <button class="btn btn-sm btn-sell" id="pfSellBtn" onclick="submitPlayerAction('sell')">▼ Sell</button>
+      </div>
+      <div class="pf-queued" id="pfQueued"></div>
+      <div class="pf-note">Orders are queued and execute on the next round · fees &amp; slippage apply.</div>
+    </div>
     <div class="card">
       <div class="card-title">🏆 Leaderboard</div>
       <div id="rankingList"><div class="empty-hint">No data yet.</div></div>
@@ -935,9 +951,6 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
 
 <!-- Toasts (top-right) -->
 <div class="toast-container" id="toastContainer"></div>
-
-<!-- Transparent overlay shown while AI is thinking (blocks all clicks). -->
-<div class="think-overlay" id="thinkOverlay"></div>
 
 <!-- Small waiting window -->
 <div class="wait-window" id="waitWindow">
@@ -1247,10 +1260,9 @@ function setThinking(on){
   const btn=document.getElementById('btnStep');
   btn.disabled=on||!sim.running;
   btn.innerHTML=on?'<span class="btn-spinner"></span> Thinking…':'Next Round ▶';
-  // The full-screen click-blocker is only needed for manual play; during
-  // auto-play it would swallow clicks on the Pause button.
-  const ov=document.getElementById('thinkOverlay');
-  if(ov)ov.classList.toggle('show',on&&!autoActive);
+  // No full-screen blocker: the page stays interactive while agents think;
+  // only agent-affecting controls (chat) are disabled via body.thinking.
+  document.body.classList.toggle('thinking',on);
 }
 
 function stopAuto(){
@@ -1263,8 +1275,6 @@ function stopAuto(){
     if(btn)btn.disabled=true;
     const spd=document.getElementById('speedSelect');
     if(spd)spd.disabled=true;
-    const ov=document.getElementById('thinkOverlay');
-    if(ov)ov.classList.add('show');
   }
   document.getElementById('waitWindow').classList.remove('auto-running');
 }
@@ -1346,7 +1356,7 @@ async function startSim(opts){
     renderPortfolio();
     updateTopBar();
     document.getElementById('agentCount').textContent=Object.keys(sim.agents).length;
-    document.getElementById('pfStockBadge').textContent=sim.selectedStock;
+    populatePfStocks();
     loadSocialData();
     requestAnimationFrame(()=>{drawCandles();});
 
@@ -1476,8 +1486,6 @@ function toggleAuto(){
     if(sim.thinking){
       document.getElementById('btnAuto').disabled=true;
       document.getElementById('speedSelect').disabled=true;
-      const ov=document.getElementById('thinkOverlay');
-      if(ov)ov.classList.add('show');
     }
   }else{
     sim.autoTimer=setInterval(()=>runStep(),sim.autoInterval);
@@ -1487,8 +1495,6 @@ function toggleAuto(){
     if(sim.thinking){
       document.getElementById('btnAuto').disabled=false;
       document.getElementById('speedSelect').disabled=false;
-      const ov=document.getElementById('thinkOverlay');
-      if(ov)ov.classList.remove('show');
     }
   }
   document.getElementById('waitWindow').classList.toggle('auto-running',sim.thinking&&!!sim.autoTimer);
@@ -2166,28 +2172,84 @@ function playerAgent(){
 }
 
 /* =========================================================
-   Your Portfolio — player trading panel (P0)
+   Your Portfolio — player trading panel (multi-stock)
    ========================================================= */
+function pfStockId(){
+  const sel=document.getElementById('pfStock');
+  if(sel&&sel.value)return sel.value;
+  return STOCKS[0]?STOCKS[0].id:sim.selectedStock;
+}
+function pfPriceFor(id){
+  const info=sim.stockPrices&&sim.stockPrices[id];
+  return info?info.last:currentPrice();
+}
+function pfHoldingQty(p,id){
+  const h=p&&p.holdings;
+  if(!h||typeof h!=='object')return 0;
+  const v=h[id];
+  return typeof v==='number'?v:0;
+}
+function populatePfStocks(){
+  const sel=document.getElementById('pfStock');
+  if(!sel)return;
+  const cur=sel.value;
+  sel.innerHTML=STOCKS.map(s=>{
+    const p=pfPriceFor(s.id);
+    return `<option value="${s.id}">${s.id} — $${p.toFixed(2)}</option>`;
+  }).join('');
+  sel.value=STOCKS.some(s=>s.id===cur)?cur:(STOCKS[0]?STOCKS[0].id:'');
+}
+function onPfStockChange(){
+  renderPortfolio();
+}
+
 function renderPortfolio(){
   const p=playerAgent();
   const cashEl=document.getElementById('pfCash');
   if(!cashEl)return;
-  if(!p){['pfCash','pfShares','pfWealth','pfReturn'].forEach(id=>{document.getElementById(id).textContent='—';});return;}
+  if(!p){['pfCash','pfWealth','pfReturn'].forEach(id=>{document.getElementById(id).textContent='—';});return;}
   document.getElementById('pfCash').textContent='$'+(p.cash||0).toLocaleString(undefined,{maximumFractionDigits:0});
-  document.getElementById('pfShares').textContent=holdingQty(p).toFixed(0);
   document.getElementById('pfWealth').textContent='$'+(p.wealth||0).toLocaleString(undefined,{maximumFractionDigits:0});
   const ret=p.return_pct||0;
   const retEl=document.getElementById('pfReturn');
   retEl.textContent=(ret>=0?'+':'')+ret.toFixed(2)+'%';
   retEl.className='pf-val '+(ret>=0?'pos':'neg');
 
+  // Per-stock holdings table (click a row to select that stock for trading).
+  const sel=document.getElementById('pfStock');
+  const active=pfStockId();
+  populatePfStocks();
+  if(sel)sel.value=active;
+  document.getElementById('pfStockBadge').textContent=active;
+  const holdEl=document.getElementById('pfHoldings');
+  if(holdEl){
+    const rows=STOCKS.map(s=>{
+      const qty=pfHoldingQty(p,s.id);
+      const price=pfPriceFor(s.id);
+      const val=qty*price;
+      return `
+      <div class="pf-h-row${active===s.id?' active':''}" onclick="selectPfStock('${s.id}')" title="Click to trade ${s.id}">
+        <span class="pf-h-name">${s.id}</span>
+        <span class="pf-h-qty">${qty.toFixed(0)} sh @ $${price.toFixed(2)}</span>
+        <span class="pf-h-val">$${val.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+      </div>`;
+    }).join('');
+    holdEl.innerHTML=rows||'<div class="pf-h-empty">No stocks listed.</div>';
+  }
+
   const q=document.getElementById('pfQueued');
   if(sim.playerQueued){
-    q.textContent=`⏳ Queued: ${sim.playerQueued.action.toUpperCase()} ${sim.playerQueued.qty} ${sim.selectedStock} — executes next round`;
+    q.textContent=`⏳ Queued: ${sim.playerQueued.action.toUpperCase()} ${sim.playerQueued.qty} ${sim.playerQueued.stock} — executes next round`;
     q.classList.add('show');
   }else{
     q.classList.remove('show');
   }
+}
+
+function selectPfStock(id){
+  const sel=document.getElementById('pfStock');
+  if(sel)sel.value=id;
+  renderPortfolio();
 }
 
 function setPfSide(side){
@@ -2198,10 +2260,11 @@ function setPfSide(side){
 
 function fillPfQty(frac){
   const p=playerAgent();
-  const price=currentPrice();
+  const id=pfStockId();
+  const price=pfPriceFor(id);
   let max;
   if(sim.pfSide==='sell'){
-    max=holdingQty(p);
+    max=pfHoldingQty(p,id);
   }else{
     max=price>0?Math.floor((p?(p.cash||0):0)/price):0;
   }
@@ -2210,23 +2273,25 @@ function fillPfQty(frac){
 
 async function submitPlayerAction(action){
   if(!sim.running){showToast('Simulation is not running — start a new one first.','error');return;}
+  const stockId=pfStockId();
   const qtyEl=document.getElementById('pfQty');
   const qty=parseInt(qtyEl.value,10);
   if(!qty||qty<=0){showToast('Enter a quantity greater than 0 first.','error');qtyEl.focus();return;}
   if(action==='sell'){
     const p=playerAgent();
-    if(holdingQty(p)<qty){showToast(`You only hold ${holdingQty(p).toFixed(0)} shares.`,'error');return;}
+    const held=pfHoldingQty(p,stockId);
+    if(held<qty){showToast(`You only hold ${held.toFixed(0)} shares of ${stockId}.`,'error');return;}
   }
   try{
     const resp=await fetch('/api/player_action',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action,quantity:qty,name:sim.selectedStock}),
+      body:JSON.stringify({action,quantity:qty,name:stockId}),
     });
     const data=await resp.json();
     if(data.error){showError(data.error);return;}
-    sim.playerQueued={action,qty};
+    sim.playerQueued={action,qty,stock:stockId};
     renderPortfolio();
-    showToast(`Order queued: ${action.toUpperCase()} ${qty} — it executes on the next round.`,'success');
+    showToast(`Order queued: ${action.toUpperCase()} ${qty} ${stockId} — it executes on the next round.`,'success');
   }catch(e){showError('Order failed: '+e.message);}
 }
 
@@ -3085,13 +3150,13 @@ document.addEventListener('keydown',(e)=>{
   const drawerOpen=document.getElementById('socialOverlay').classList.contains('show')
     ||document.getElementById('settingsOverlay').classList.contains('show');
   if(document.querySelector('.modal-overlay.show')||drawerOpen){
-    if(e.key==='c'||e.key==='C')openChatPanel(true);
+    if((e.key==='c'||e.key==='C')&&!sim.thinking)openChatPanel(true);
     return;
   }
   if(e.key===' '){e.preventDefault();runStep();}
   else if(e.key==='a'||e.key==='A'){if(sim.running)toggleAuto();}
   else if(e.key==='s'||e.key==='S'){if(sim.running)endSim();}
-  else if(e.key==='c'||e.key==='C'){openChatPanel(true);}
+  else if(e.key==='c'||e.key==='C'){if(!sim.thinking)openChatPanel(true);}
   else if(e.key==='n'||e.key==='N'){toggleGraphOpen();}
   else if(e.key==='e'||e.key==='E'){exportReport();}
 });
@@ -3115,7 +3180,7 @@ const GUIDE_SECTIONS=[
 <li><b>Next Round ▶</b> (<span class="guide-tag">Space</span>): every AI agent observes the market, decides, and trades once.</li>
 <li><b>▶ Auto</b> (<span class="guide-tag">A</span>) plays rounds continuously; the speed selector changes the delay.</li>
 <li>The <b>progress bar</b> in the top bar shows how many rounds remain. Press <b>⏹ End</b> to finish early and see results.</li>
-<li>While agents are thinking, a full-screen overlay blocks clicks — wait for it to clear.</li>
+<li>While agents are thinking the page stays interactive — only Chat is paused until the round finishes.</li>
 </ul>`},
 {id:'stocks',icon:'📈',title:'Stocks & History',html:`
 <p>All configured stocks live in the <b>left column</b>; click one to switch the chart.</p>
