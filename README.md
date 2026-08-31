@@ -77,7 +77,10 @@ can emerge from interactions between autonomous AI agents.
 - **Market events** — 41 templates across 10 categories (global events hit every
   stock; company-specific ones hit one).
 - **Agent memory** — short-term decision summaries, long-term memory of key
-  events, and (in deep mode) one-line lessons a trader writes for itself.
+  events, and (in deep mode) one-line lessons a trader writes for itself. The
+  last `memory_window` rounds (default 3) are replayed as the trader's own
+  replies plus a one-line recap of each round, so request size stays flat
+  across a long run instead of compounding.
 - **Learning feedback** — each agent sees its last round's fills and their
   price moves since execution to learn from its own outcomes.
 - **Grading** — every agent gets a blended 0-100 score + S/A/B/C/D grade from
@@ -91,6 +94,10 @@ can emerge from interactions between autonomous AI agents.
 - **Mood timeline** — in deep mode, an agent's decision log traces all three
   mood axes (confidence / stress / frustration) round by round, next to the
   trades they accompanied.
+- **Agents who know themselves in chat** — every chat message carries a fresh
+  briefing: the trader's real character text, its idol / friends / enemies by
+  name, its mood, standing, recent decisions, lessons and the live market. Chat
+  is read-only — nothing said to a trader reaches its trading memory.
 - **Social relationships** — idol / friends / enemies decide which other
   traders an agent pays attention to: their recent moves, and in deep mode
   their stated reasoning.
@@ -349,6 +356,7 @@ reload one with `load_run_snapshot()`.
 | `UsageTracker` / `collect_usage(agents)` | Per-agent token & cost accounting; aggregate a roster. |
 | `model_price(model)` / `compute_cost(model, in, out)` | Price lookup; `None` means unpriced, never free. |
 | `PROMPT_TEMPLATE_VERSION` / `describe_prompt(agent)` | Prompt generation and the fingerprint of the prompt in use. |
+| `build_chat_system_prompt(env, agent_id)` | The read-only background briefing an agent carries into a chat. |
 | `evaluate_wealth_curve(wealths)` | Sharpe / max-drawdown / volatility / win-rate from a wealth curve. |
 | `grade_performance(ret, sharpe, drawdown, win_rate)` | Blend into a 0-100 score + S/A/B/C/D grade. |
 | `grade_wealth_curve(wealths, initial_wealth)` | Metrics + score + grade in one call. |
@@ -364,6 +372,7 @@ ai_trading_society/
 ├── usage.py              # Token & cost accounting per agent
 ├── model_prices.json     # USD per 1M tokens (user-maintained)
 ├── prompt_version.py     # Prompt generation + fingerprints
+├── chat_context.py       # Background briefing sent when chatting
 ├── web/app.py            # Flask dashboard API
 ├── agents/
 │   ├── external_ai_agent.py   # LLM trader (multi-provider, memory)

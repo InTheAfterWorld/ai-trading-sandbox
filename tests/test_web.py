@@ -105,3 +105,99 @@ def test_api_config_persists_homepage_adjustments(client, tmp_config_path):
 def test_api_env_keys_removed(client):
     res = client.get("/api/env_keys")
     assert res.status_code == 404
+
+
+# --- Chat briefing: the background an agent carries into a conversation -----
+# `chat` is monkeypatched at class level so these run without an API key: the
+# assertion is about what the endpoint SENDS, not what a model replies.
+
+def _capture_chat(monkeypatch):
+    """Patch ExternalAIAgent.chat and return the dict it records into."""
+    from ai_trading_society.agents.external_ai_agent import ExternalAIAgent
+
+    captured = {}
+
+    def fake_chat(self, message, system_prompt=None, history=None):
+        captured["prompt"] = system_prompt
+        captured["history"] = list(history or [])
+        return "ok"
+
+    monkeypatch.setattr(ExternalAIAgent, "chat", fake_chat)
+    return captured
+
+
+def _start_two_traders(client):
+    return client.post("/api/start", json={
+        "steps": 5,
+        "deep_persona": True,
+        "traders": [
+            {"name": "Alice", "provider": "openai", "model": "gpt-4o",
+             "api_key": "k", "personality": "aggressive"},
+            {"name": "Bob", "provider": "openai", "model": "gpt-4o",
+             "api_key": "k", "personality": "greedy"},
+        ],
+    })
+
+
+def test_api_chat_sends_the_briefing(client, monkeypatch):
+    captured = _capture_chat(monkeypatch)
+    _start_two_traders(client)
+
+    res = client.post("/api/chat", json={"agent_id": "Alice", "message": "hi"})
+    assert res.status_code == 200
+    assert res.get_json()["reply"] == "ok"
+
+    prompt = captured["prompt"]
+    assert "=== WHO YOU ARE ===" in prompt
+    assert "=== WHERE YOU STAND ===" in prompt
+    assert "Alice" in prompt
+    # Relations resolved against the custom trader names from the homepage,
+    # not the default model ids resolve_social_map starts from.
+    assert "Bob" in prompt
+    # The decision prompt's closing rule has no business in a conversation.
+    assert "never explain a hold and then trade" not in prompt
+
+
+def test_api_chat_briefing_is_rebuilt_each_round(client, monkeypatch):
+    captured = _capture_chat(monkeypatch)
+    _start_two_traders(client)
+
+    client.post("/api/chat", json={"agent_id": "Alice", "message": "hi"})
+    first = captured["prompt"]
+    client.post("/api/step")
+    client.post("/api/chat", json={"agent_id": "Alice", "message": "and now?"})
+    second = captured["prompt"]
+
+    assert first != second, "briefing must reflect the round it was sent in"
+
+
+def test_api_chat_history_still_accumulates(client, monkeypatch):
+    captured = _capture_chat(monkeypatch)
+    _start_two_traders(client)
+
+    client.post("/api/chat", json={"agent_id": "Alice", "message": "first"})
+    assert captured["history"] == []
+    client.post("/api/chat", json={"agent_id": "Alice", "message": "second"})
+    assert captured["history"] == [
+        {"role": "user", "content": "first"},
+        {"role": "assistant", "content": "ok"},
+    ]
+
+
+def test_api_chat_builder_failure_returns_json(client, monkeypatch):
+    _capture_chat(monkeypatch)
+    _start_two_traders(client)
+
+    # `ai_trading_society.web` re-exports the Flask object as `app`, which
+    # shadows the submodule on attribute access -- reach the module itself.
+    import importlib
+
+    web_app = importlib.import_module("ai_trading_society.web.app")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("briefing exploded")
+
+    monkeypatch.setattr(web_app, "build_chat_system_prompt", boom)
+    res = client.post("/api/chat", json={"agent_id": "Alice", "message": "hi"})
+    assert res.status_code == 500
+    assert "briefing exploded" in res.get_json()["error"]

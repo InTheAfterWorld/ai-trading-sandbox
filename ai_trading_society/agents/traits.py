@@ -29,6 +29,26 @@ _IN_CHARACTER_CHECK = (
     "explain a buy and then sell."
 )
 
+
+def character_text(disposition: str) -> str:
+    """The persona text without the trading-specific closing check.
+
+    Chat needs who the trader is, not the reasoning/action consistency rule
+    ``build_disposition`` appends for the decision prompt.
+
+    Strips by splitting on the same separator ``build_disposition`` joins
+    with and dropping the part equal to the constant, so a reworded check
+    still falls out. Rebuilding the disposition instead would be wrong:
+    ``TraitAgent`` keeps only the assembled string, not the ``persona`` and
+    ``trait_notes`` that went into it, so a rebuild would silently discard
+    the user's own character text.
+    """
+    parts = [
+        part for part in (disposition or "").split("\n\n")
+        if part.strip() and part.strip() != _IN_CHARACTER_CHECK
+    ]
+    return "\n\n".join(parts)
+
 # The three mood axes (0-10) and the rule-based mood dynamics live in
 # ``mood``; ``MOOD_AXES`` is re-exported here for existing importers.
 

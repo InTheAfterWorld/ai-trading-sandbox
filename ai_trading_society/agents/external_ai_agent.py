@@ -13,8 +13,9 @@ can mark it as failed and display it accordingly.
 import json
 import math
 import re
+import threading
 import time
-from typing import Any, Dict, List, Optional, cast
+from typing import Any, Dict, List, Optional, Tuple, cast
 
 from ..base_agent import BaseAgent
 from ..prompt_version import PROMPT_TEMPLATE_VERSION, prompt_fingerprint
@@ -99,6 +100,20 @@ _RETRYABLE_STATUS = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 # call. Cap how many a single agent may spend across a whole run so one
 # badly-behaved model cannot multiply the cost and latency of every round.
 _DEFAULT_REPAIR_BUDGET = 6
+
+# Per-request HTTP timeout, in seconds, applied to every provider SDK.
+#
+# Bounds one call so a slow or unresponsive provider cannot hang an entire
+# /api/step for an SDK default (600s on both the OpenAI and Anthropic
+# clients). 100s fits a single call inside the dashboard's 150s step abort.
+#
+# It does not cover the whole ladder: _call_ai_api_with_retry can spend this
+# twice, and _retry_with_escalation up to three more calls on top, so a
+# pathological round can still outlive the frontend's abort. That is
+# deliberate -- the UI recovering matters more than the round completing --
+# but it means a "step timed out" toast can mean "the provider needed two
+# attempts", not only "the provider is down".
+_REQUEST_TIMEOUT = 100
 
 
 def _coerce_price(value: Any) -> Optional[float]:
@@ -241,7 +256,11 @@ class ExternalAIAgent(BaseAgent):
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
         position_ratio: float = 0.2,
-        memory_window: int = 6,
+        # How many past rounds are replayed. Governs both the conversation
+        # history and the one-line decision summaries, so it is the main
+        # lever on request size: each step costs input tokens on every
+        # later round, and a slow request is what trips the step timeout.
+        memory_window: int = 3,
         enable_memory: bool = True,
         max_tokens: Optional[int] = None,
         repair_budget: int = _DEFAULT_REPAIR_BUDGET,
@@ -307,6 +326,17 @@ class ExternalAIAgent(BaseAgent):
         # costs extra. Set around the call rather than passed through
         # _call_ai_api, whose signature tests stub.
         self._call_kind = "decision"
+        # Provider SDK client, reused across calls. Each client owns its own
+        # HTTP connection pool, so building one per call meant every request
+        # re-did the TCP and TLS handshake instead of reusing a warm
+        # connection -- the largest fixed cost left in a round, and one paid
+        # again by every retry and repair re-ask. Cached against the
+        # settings that determine the connection so a changed key or
+        # endpoint still rebuilds. Guarded because /api/chat can call an
+        # agent while /api/step has it mid-round.
+        self._client_cache: Dict[str, Tuple[Any, Any]] = {}
+        self._client_lock = threading.Lock()
+
         # Tokens and cost for every call this agent makes, tagged by round.
         self.usage = UsageTracker(
             agent_id=agent_id, provider=api_provider, model=self.model
@@ -476,6 +506,30 @@ class ExternalAIAgent(BaseAgent):
         # Keep the most recent 10 key events to bound prompt size.
         if len(self._key_events) > 10:
             self._key_events = self._key_events[-10:]
+
+    def _round_recap(self, observation: Dict[str, Any]) -> str:
+        """A one-line stand-in for a past round's full prompt.
+
+        The conversation history used to store each round's prompt verbatim,
+        which meant ~78% of every request was re-sent copies of earlier
+        market data -- and redundant copies at that, since the same rounds
+        are already summarized into the new prompt by
+        ``_build_memory_context``. The model's own replies are what carry
+        continuity, so those are kept in full and the question that prompted
+        them is reduced to the few facts that give a reply its anchor: which
+        round it was, where prices stood, and what the agent was worth.
+        """
+        bits = []
+        for stock in (observation.get("stocks") or [])[:6]:
+            name = stock.get("name") or stock.get("symbol") or "?"
+            bits.append(f"{name} ${float(stock.get('price', 0) or 0):,.2f}")
+        prices = "; ".join(bits) or "no price data"
+        wealth = float(observation.get("my_wealth", 0.0) or 0.0)
+        return (
+            f"[Round {observation.get('step', 0)} — {prices} | your wealth "
+            f"${wealth:,.0f}. Full market data for that round omitted; the "
+            "current round's data is below.]"
+        )
 
     def _summarize_decisions(self, step: int, result: Dict[str, Any]) -> str:
         """Compress one round's decision into a single summary line."""
@@ -861,6 +915,21 @@ class ExternalAIAgent(BaseAgent):
     # API calls
     # ------------------------------------------------------------------
 
+    def _cached_client(self, kind: str, key: Any, build: Any) -> Any:
+        """Return this agent's SDK client for ``kind``, building it once.
+
+        ``key`` is whatever determines the connection (credentials, base
+        URL, timeout); when it changes the client is rebuilt, so editing a
+        trader's endpoint mid-run cannot keep talking to the old one.
+        """
+        with self._client_lock:
+            cached = self._client_cache.get(kind)
+            if cached is not None and cached[0] == key:
+                return cached[1]
+            client = build()
+            self._client_cache[kind] = (key, client)
+            return client
+
     def _record_call(
         self,
         response: Any,
@@ -1077,14 +1146,15 @@ class ExternalAIAgent(BaseAgent):
         client_kwargs: Dict[str, Any] = {"api_key": self.api_key}
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
-        # Bound the HTTP request so a slow / unresponsive provider cannot
-        # hang an entire /api/step for the SDK's default 600s. 100s keeps
-        # it inside the frontend's 120s step timeout so the UI recovers.
-        client_kwargs["timeout"] = 100
+        client_kwargs["timeout"] = _REQUEST_TIMEOUT
 
         # client_kwargs is built dynamically for OpenAI-compatible providers,
         # so mypy cannot validate the expanded kwargs here.
-        client = openai.OpenAI(**client_kwargs)  # type: ignore[arg-type]
+        client = self._cached_client(
+            "openai",
+            (self.api_key, self.base_url, _REQUEST_TIMEOUT),
+            lambda: openai.OpenAI(**client_kwargs),  # type: ignore[arg-type]
+        )
 
         if messages is None:
             # Trading mode: system prompt + memory + new user message.
@@ -1142,7 +1212,16 @@ class ExternalAIAgent(BaseAgent):
                 "anthropic package not installed. Install with: pip install anthropic"
             )
 
-        client = anthropic.Anthropic(api_key=self.api_key)
+        # The timeout was previously left at the SDK's 600s default here,
+        # so an Anthropic trader could hang long after the dashboard had
+        # already given up on the round. Bounded like every other provider.
+        client = self._cached_client(
+            "anthropic",
+            (self.api_key, _REQUEST_TIMEOUT),
+            lambda: anthropic.Anthropic(
+                api_key=self.api_key, timeout=_REQUEST_TIMEOUT
+            ),
+        )
 
         system = system_prompt if system_prompt is not None else self.system_prompt
 
@@ -1724,10 +1803,13 @@ class ExternalAIAgent(BaseAgent):
                 observation, prompt, response, parse_error
             )
 
-        # Store conversation turn for memory.
+        # Store conversation turn for memory. The user half is a recap, not
+        # the prompt that was sent: see _round_recap. The pairing is kept so
+        # the replayed history still alternates user/assistant and opens on
+        # a user turn, which some providers require.
         if self.enable_memory:
             self._conversation_history.append(
-                {"role": "user", "content": prompt}
+                {"role": "user", "content": self._round_recap(observation)}
             )
             self._conversation_history.append(
                 {"role": "assistant", "content": response}

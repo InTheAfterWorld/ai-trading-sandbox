@@ -7,7 +7,77 @@ still contain breaking changes).
 
 ## [0.3.0] — unreleased
 
+### Changed
+
+- **Per-round records no longer re-copy the whole price series.** Every state
+  snapshot stored a full copy of each stock's price history, and the same
+  series was shipped twice in every `/api/step` response and kept in the web
+  session's history. Retention and total transfer were quadratic in round
+  count: at 300 rounds with 5 stocks, 227,250 floats were retained where 1,500
+  were unique — a 152x duplication that every run also wrote to
+  `state_history.json`. Nothing read any of it.
+  - `_get_state`'s per-stock entry now carries this round's figures only.
+    Retained snapshot data at 300 rounds: 5.87 MB → 1.62 MB, with the price
+    series fully reconstructible from the initial price (already in the run
+    metadata) plus each round's `price`.
+  - The `/api/step` response drops its per-stock and top-level `price_history`.
+    Response size is now flat in round count (was 4.5x growth over 250
+    rounds); total shipped 1.72 MB → 0.51 MB; `/api/history` 1.49 MB → 473 KB.
+  - `/api/start` and `/api/results` keep their `price_history` — those are the
+    two the dashboard actually reads, to seed the live chart and draw the
+    final one.
+  - Verified byte-identical behaviour: same seed produces the same prices,
+    volumes, trades, wealth curves, performance metrics, and the same
+    exported-report SHA.
+
+- **Provider connections are reused instead of rebuilt per call.** Each SDK
+  client owns its own HTTP connection pool, and one was constructed for every
+  request — so every call re-did the TCP and TLS handshake rather than reusing
+  a warm connection, a cost paid again by each retry and repair re-ask. The
+  client is now cached per agent, keyed on the credentials, endpoint and
+  timeout, so changing any of those still rebuilds it. Clients are also no
+  longer created and abandoned once per call.
+- The Anthropic client had **no timeout set**, leaving it on the SDK's 600s
+  default — long past the point the dashboard abandons the round. It now uses
+  the same 100s per-request bound as every other provider.
+- **Rounds send far less, so they time out far less.** The conversation
+  history replayed each past round's prompt verbatim, so by round 10 about
+  78% of every request was duplicated market data — redundant, since the same
+  rounds are already summarized into the new prompt. The user half of each
+  stored turn is now a one-line recap (round, prices, wealth); the model's own
+  replies are still kept in full, because those are what carry continuity.
+  Measured on a 3-agent / 3-stock deep run, a round-20 request went from
+  ~7,600 to ~2,200 tokens, and growth across a run from 5.5x to 1.6x.
+- `memory_window` default lowered from 6 to 3. It bounds both the replayed
+  history and the one-line decision summaries, so agents now recall three
+  rounds rather than six.
+- The dashboard's step abort is 150s (was 120s). One 100s provider call fits
+  with room to spare; a call that also burns its transient retry can still
+  exceed it, so a "step timed out" toast can mean "the provider needed two
+  attempts", not only "the provider is down".
+
 ### Added
+
+- **Agents know their own background when you chat with them.** The chat panel
+  used to send a one-line prompt — an id, a personality name, a canned preset
+  label and a balance sheet — so a trader could discuss its cash and nothing
+  else. Every message now carries a freshly built briefing: who it is (its real
+  character text, including a custom `persona` and `trait_notes`, which never
+  reached chat before), its idol / friends / enemies **by name** with each
+  peer's rank, return, last move and what they said, its mood (deep mode), its
+  standing, portfolio, recent decisions, key events lived through, lessons and
+  committed exit plans, and the current market.
+  - Rebuilt per message, because standing, mood and memory are only true for
+    the round they were read in.
+  - **Read-only**: the briefing flows into the model as a system prompt and
+    nothing flows back. No chat turn reaches trading memory, so a human cannot
+    talk a trader into a position and a run stays reproducible from its config,
+    seed and prompt version.
+  - Chat spend per message rises accordingly (~500–800 extra tokens); it is
+    metered separately under the `chat` kind in `GET /api/usage`.
+  - `PROMPT_TEMPLATE_VERSION` is deliberately **not** bumped: it versions the
+    decision prompt, and a chat-only change must not invalidate run
+    comparability.
 
 - **Token and cost accounting per agent.** Every provider call is recorded
   against the agent that made it, tagged with its round and why it was made

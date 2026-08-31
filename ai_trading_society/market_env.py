@@ -549,6 +549,14 @@ class MarketEnv:
 
         return obs
 
+    def standing_for(self, agent_id: str) -> Dict[str, Any]:
+        """Public read of one agent's rank and gap to the leader.
+
+        The observation carries ``standing`` only in deep mode; callers
+        outside the decision path (the chat briefing) need it in both.
+        """
+        return self._standing_for(agent_id)
+
     def _standing_for(self, agent_id: str) -> Dict[str, Any]:
         """Rank this agent by return, and name whoever is leading."""
         returns: Dict[str, float] = {}
@@ -1069,11 +1077,17 @@ class MarketEnv:
             "price": self.price,  # backward compat (first stock)
             "total_buy": total_buy,
             "total_sell": total_sell,
+            # Per-stock figures for THIS round only. The full price series is
+            # deliberately absent: copying it into every snapshot made the
+            # retained history O(stocks * rounds^2) -- 227k floats by round
+            # 300 where 1.5k are unique -- and every run wrote that to
+            # state_history.json. Nothing read it. The series is still
+            # reconstructible from a run's snapshots as the initial price
+            # (recorded in metadata config) followed by each round's "price".
             "stocks": {
                 sym: {
                     "price": sm.price,
                     "name": sm.name,
-                    "price_history": list(sm.price_history),
                     "volume": sm.volume_history[-1] if sm.volume_history else 0,
                     "total_buy": per_stock_totals.get(sym, {}).get("total_buy", 0),
                     "total_sell": per_stock_totals.get(sym, {}).get("total_sell", 0),

@@ -33,6 +33,7 @@ from ai_trading_society.agents.external_ai_agent import (
 )
 from ai_trading_society.agents.player_agent import PlayerAgent
 from ai_trading_society.agents.roster import build_agent_roster, resolve_social_map
+from ai_trading_society.chat_context import build_chat_system_prompt
 from ai_trading_society.config import MarketConfig, StockSpec
 from ai_trading_society.config_store import (
     load_config,
@@ -774,13 +775,20 @@ def api_step():
         state["prev_wealths"][aid] = env.agent_wealth(agent)
 
     # Per-stock data for the frontend chart.
+    # This round's per-stock figures, used BOTH in the response and in the
+    # retained history snapshot below -- built once so the two cannot drift.
+    #
+    # No price series here. The dashboard appends one point per round from
+    # "price" and never read it, so shipping the whole series every round
+    # only grew the response without bound (4.5x over 250 rounds) and made
+    # the session's history O(stocks * rounds^2). /api/start still sends the
+    # series once, which is what seeds the chart.
     stocks_payload = [
         {
             "symbol": sm.symbol,
             "name": sm.name,
             "price": round(sm.price, 2),
             "initial_price": round(sm.initial_price, 2),
-            "price_history": [round(p, 2) for p in sm.price_history],
             "volume": sm.volume_history[-1] if sm.volume_history else 0,
             "sector": sm.sector,
             "blurb": sm.blurb,
@@ -836,7 +844,6 @@ def api_step():
             }
             for e in active_events
         ],
-        "price_history": [round(p, 2) for p in env.price_history],
     })
 
 
@@ -1322,31 +1329,18 @@ def api_chat():
     if not hasattr(target, "chat"):
         return jsonify({"error": "This agent has no AI backend to chat with"}), 400
 
-    h = agent.holdings if isinstance(agent.holdings, dict) else {}
-    wealth = env.agent_wealth(agent)
-    init_w = state["initial_wealths"].get(agent_id, wealth)
-    ret = (wealth / init_w - 1) * 100 if init_w > 0 else 0.0
-
-    holdings_str = ", ".join(
-        f"{sym}:{qty:g}" for sym, qty in h.items()
-    ) if h else "0"
-
-    persona = (
-        f"You are '{agent_id}', a trader in the AI TRADING SANDBOX market sandbox. "
-        f"Your trading personality: {agent_personality(agent)}. "
-        f"{agent_personality_desc(agent)} "
-        f"Current situation — cash: ${agent.cash:.0f}, "
-        f"holdings: {holdings_str}, total wealth: ${wealth:.0f} "
-        f"({ret:+.1f}% return so far). "
-        "Reply in character, conversationally, in 2-4 sentences. "
-        "Do not output JSON."
-    )
-
     # Per-agent chat history kept server-side (last 20 turns).
     chats = state.setdefault("chats", {})
     history = list(chats.get(agent_id, []))
 
     try:
+        # Rebuilt every message: the trader's standing, mood and memory are
+        # only true for the round they were read in. Built inside the try so
+        # a failure here returns the JSON error the frontend already handles
+        # rather than a Flask HTML 500.
+        persona = build_chat_system_prompt(
+            env, agent_id, initial_wealths=state.get("initial_wealths") or {}
+        )
         reply = target.chat(message, system_prompt=persona, history=history)
     except Exception as exc:  # missing key, network error, rate limit, etc.
         return jsonify({"error": str(exc)}), 500
