@@ -2,6 +2,11 @@ services:
   - type: web
     name: ai-trading-sandbox
     runtime: python
+    plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn --chdir /opt/render/project/src --bind 0.0.0.0:$PORT --workers 1 --timeout 300 ai_trading_society.web.render_app:app
+    startCommand: gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 300 --access-logfile - ai_trading_society.web.render_app:app
     healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: ATS_REDACT_CONFIG
+        value: "1"
