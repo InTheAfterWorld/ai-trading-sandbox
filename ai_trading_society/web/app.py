@@ -775,13 +775,20 @@ def api_step():
         state["prev_wealths"][aid] = env.agent_wealth(agent)
 
     # Per-stock data for the frontend chart.
+    # This round's per-stock figures, used BOTH in the response and in the
+    # retained history snapshot below -- built once so the two cannot drift.
+    #
+    # No price series here. The dashboard appends one point per round from
+    # "price" and never read it, so shipping the whole series every round
+    # only grew the response without bound (4.5x over 250 rounds) and made
+    # the session's history O(stocks * rounds^2). /api/start still sends the
+    # series once, which is what seeds the chart.
     stocks_payload = [
         {
             "symbol": sm.symbol,
             "name": sm.name,
             "price": round(sm.price, 2),
             "initial_price": round(sm.initial_price, 2),
-            "price_history": [round(p, 2) for p in sm.price_history],
             "volume": sm.volume_history[-1] if sm.volume_history else 0,
             "sector": sm.sector,
             "blurb": sm.blurb,
@@ -837,7 +844,6 @@ def api_step():
             }
             for e in active_events
         ],
-        "price_history": [round(p, 2) for p in env.price_history],
     })
 
 

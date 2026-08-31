@@ -9,6 +9,27 @@ still contain breaking changes).
 
 ### Changed
 
+- **Per-round records no longer re-copy the whole price series.** Every state
+  snapshot stored a full copy of each stock's price history, and the same
+  series was shipped twice in every `/api/step` response and kept in the web
+  session's history. Retention and total transfer were quadratic in round
+  count: at 300 rounds with 5 stocks, 227,250 floats were retained where 1,500
+  were unique — a 152x duplication that every run also wrote to
+  `state_history.json`. Nothing read any of it.
+  - `_get_state`'s per-stock entry now carries this round's figures only.
+    Retained snapshot data at 300 rounds: 5.87 MB → 1.62 MB, with the price
+    series fully reconstructible from the initial price (already in the run
+    metadata) plus each round's `price`.
+  - The `/api/step` response drops its per-stock and top-level `price_history`.
+    Response size is now flat in round count (was 4.5x growth over 250
+    rounds); total shipped 1.72 MB → 0.51 MB; `/api/history` 1.49 MB → 473 KB.
+  - `/api/start` and `/api/results` keep their `price_history` — those are the
+    two the dashboard actually reads, to seed the live chart and draw the
+    final one.
+  - Verified byte-identical behaviour: same seed produces the same prices,
+    volumes, trades, wealth curves, performance metrics, and the same
+    exported-report SHA.
+
 - **Provider connections are reused instead of rebuilt per call.** Each SDK
   client owns its own HTTP connection pool, and one was constructed for every
   request — so every call re-did the TCP and TLS handshake rather than reusing
