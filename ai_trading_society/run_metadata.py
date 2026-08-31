@@ -18,6 +18,12 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from .config import MarketConfig
+from .prompt_version import (
+    PROMPT_TEMPLATE_VERSION,
+    describe_prompt,
+    shipped_fingerprints,
+)
+from .usage import collect_usage
 
 
 def set_seed(seed: Optional[int] = None) -> int:
@@ -53,6 +59,10 @@ def get_code_version() -> Dict[str, Any]:
     """
     Get current framework version and git commit information.
 
+    Also pins the prompt generation: a run's decisions are only comparable
+    with another run's if the prompt behind them was the same, and the
+    package version alone does not say that.
+
     Returns
     -------
     dict
@@ -60,6 +70,8 @@ def get_code_version() -> Dict[str, Any]:
         - package_version: str
         - git_commit: str or None
         - git_dirty: bool or None
+        - prompt_template_version: str
+        - prompt_fingerprints: dict  Hashes of both shipped prompt variants
     """
     from . import __version__
 
@@ -89,10 +101,18 @@ def get_code_version() -> Dict[str, Any]:
     except Exception:
         pass
 
+    try:
+        fingerprints = shipped_fingerprints()
+    except Exception:
+        # Version capture must never be the thing that fails a run.
+        fingerprints = {}
+
     return {
         "package_version": __version__,
         "git_commit": git_commit,
         "git_dirty": git_dirty,
+        "prompt_template_version": PROMPT_TEMPLATE_VERSION,
+        "prompt_fingerprints": fingerprints,
     }
 
 
@@ -174,6 +194,12 @@ class RunMetadata:
                     agent_info["mood"] = dict(getattr(a, "mood"))
             if hasattr(a, "agent_type"):
                 agent_info["agent_type"] = getattr(a, "agent_type")
+            # Which prompt this specific agent ran on. Recorded per agent
+            # because a roster can mix the shipped template, a persona-
+            # prefixed one and a fully custom prompt in the same run.
+            prompt_info = describe_prompt(a)
+            if prompt_info:
+                agent_info["prompt"] = prompt_info
             agent_roster.append(agent_info)
 
         env_info = {
@@ -191,6 +217,16 @@ class RunMetadata:
             environment=env_info,
             summary={},
         )
+
+    def attach_usage(self, agents: List[Any]) -> Dict[str, Any]:
+        """Fold current token/cost accounting into ``summary["usage"]``.
+
+        Call it before saving a snapshot -- usage accumulates as the run
+        proceeds, so the metadata is only complete once the run is.
+        """
+        usage = collect_usage(agents)
+        self.summary["usage"] = usage
+        return usage
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert RunMetadata to dictionary."""

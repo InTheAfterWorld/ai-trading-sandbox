@@ -58,6 +58,14 @@ body.dark ::-webkit-scrollbar-thumb:hover{background:#3a5d91;}
 }
 .logo{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:700;color:#1565C0;white-space:nowrap;cursor:pointer;user-select:none;}
 .logo img{width:20px;height:20px;object-fit:contain;display:block;}
+/* Running LLM spend, so the bill is visible while it is being run up. */
+.run-cost{
+  display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;
+  color:var(--text-dim);background:rgba(148,163,184,.12);
+  border:1px solid var(--border);border-radius:8px;padding:4px 9px;white-space:nowrap;
+}
+.run-cost b{color:var(--text);}
+.run-cost[hidden]{display:none;}
 /* ---------- Theme switch (top bar) ---------- */
 .theme-switch{position:relative;display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0;}
 .theme-switch input{position:absolute;opacity:0;width:0;height:0;}
@@ -818,6 +826,7 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
     <span class="rp-label" id="topRound">Round 0 / 0</span>
   </span>
   <span class="spacer"></span>
+  <span class="run-cost" id="runCost" hidden title="LLM tokens and cost for this run so far"></span>
   <label class="theme-switch" title="Toggle light / dark mode">
     <input type="checkbox" id="themeSwitch" onchange="toggleTheme()">
     <span class="ts-slider"><span class="ts-sun">☀️</span><span class="ts-moon">🌙</span></span>
@@ -1447,7 +1456,11 @@ async function runStep(){
       events:data.events||[],
       agents:(data.agents||[]).map(a=>({id:a.id,action:a.action,requested:a.requested,filled:a.filled,
         reasoning:a.reasoning,wealth:a.wealth,delta:a.delta,return_pct:a.return_pct,is_player:a.is_player,cash:a.cash,holdings:a.holdings,
-        actions:a.actions||[]})),
+        actions:a.actions||[],
+        // Mood is a per-round value, not a current one: keep a copy per
+        // snapshot so the agent timeline can trace how it moved.
+        mood:a.mood?{...a.mood}:null,
+        usage:a.usage||null})),
     });
 
     // A queued player order (if any) took effect this round.
@@ -2420,6 +2433,73 @@ function renderReplay(snap){
 /* =========================================================
    Agent timeline — per-round decision log
    ========================================================= */
+/* The three mood axes, in the order they are drawn and labelled. Colors
+   match the report export so a run reads the same in both places. */
+const MOOD_AXES=[
+  {key:'confidence',label:'Confidence',color:'#22c55e'},
+  {key:'stress',    label:'Stress',    color:'#f59e0b'},
+  {key:'frustration',label:'Frustration',color:'#ef4444'},
+];
+
+/* Trace all three mood axes across the run as one inline SVG.
+
+   The y-axis is pinned to 0-10 rather than fitted to the data: mood is a
+   bounded scale, and autoscaling would turn a half-point drift into what
+   looks like a collapse. Rounds before deep mode recorded a mood are
+   skipped, so a gap never reads as a zero. */
+function moodChartSvg(rows){
+  const pts=rows.filter(r=>r.mood&&typeof r.mood==='object'&&MOOD_AXES.some(x=>r.mood[x.key]!=null));
+  if(pts.length===0)return '';
+  const W=760,H=180,padL=30,padR=10,padT=10,padB=20;
+  const w=W-padL-padR,h=H-padT-padB;
+  const n=pts.length;
+  const X=i=>padL+(n<2?w/2:w*i/(n-1));
+  const Y=v=>padT+h-h*(Math.min(Math.max(v,0),10)/10);
+
+  let g='';
+  for(let v=0;v<=10;v+=5){
+    g+=`<line x1="${padL}" y1="${Y(v).toFixed(1)}" x2="${W-padR}" y2="${Y(v).toFixed(1)}" stroke="rgba(148,163,184,.25)" stroke-width="1"/>`
+      +`<text x="${padL-6}" y="${(Y(v)+3.5).toFixed(1)}" fill="#94a3b8" font-size="9" text-anchor="end">${v}</text>`;
+  }
+  // Round labels along the bottom, thinned so they never collide.
+  const every=Math.max(1,Math.ceil(n/12));
+  for(let i=0;i<n;i+=every){
+    g+=`<text x="${X(i).toFixed(1)}" y="${H-5}" fill="#94a3b8" font-size="9" text-anchor="middle">${pts[i].round}</text>`;
+  }
+
+  let lines='';
+  MOOD_AXES.forEach(ax=>{
+    const d=pts.map((p,i)=>`${X(i).toFixed(1)},${Y(Number(p.mood[ax.key])||0).toFixed(1)}`).join(' ');
+    lines+=`<polyline points="${d}" fill="none" stroke="${ax.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if(n===1)lines+=`<circle cx="${X(0).toFixed(1)}" cy="${Y(Number(pts[0].mood[ax.key])||0).toFixed(1)}" r="3" fill="${ax.color}"/>`;
+  });
+
+  const last=pts[pts.length-1].mood, first=pts[0].mood;
+  const legend=MOOD_AXES.map(ax=>{
+    const now=Number(last[ax.key])||0, was=Number(first[ax.key])||0, d=now-was;
+    const arrow=Math.abs(d)<0.05?'→':(d>0?'↑':'↓');
+    return `<span style="display:inline-flex;align-items:center;gap:5px;">
+      <span style="width:9px;height:9px;border-radius:2px;background:${ax.color};"></span>
+      <b>${ax.label}</b> ${now.toFixed(1)}
+      <span class="muted">${arrow}${Math.abs(d).toFixed(1)}</span></span>`;
+  }).join('');
+
+  return `<div style="margin:2px 0 12px;">
+    <div class="sa-mood-title">Mood over ${n} round${n===1?'':'s'} (0–10)</div>
+    <div style="overflow-x:auto;"><svg viewBox="0 0 ${W} ${H}" width="100%" role="img"
+      aria-label="Confidence, stress and frustration per round">${g}${lines}</svg></div>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:11px;margin-top:4px;">${legend}</div>
+  </div>`;
+}
+
+/* Compact per-round mood readout for the decision-log table. */
+function moodCellHtml(mood){
+  if(!mood||typeof mood!=='object')return '<span class="muted">—</span>';
+  const bits=MOOD_AXES.filter(ax=>mood[ax.key]!=null).map(ax=>
+    `<span style="color:${ax.color};font-weight:700;" title="${ax.label}">${(Number(mood[ax.key])||0).toFixed(1)}</span>`);
+  return bits.length?bits.join('<span class="muted"> / </span>'):'<span class="muted">—</span>';
+}
+
 function openAgentTimeline(id){
   sim.tlAgentId=id;
   const color=sim.agentColors[id]||'#888';
@@ -2429,6 +2509,7 @@ function openAgentTimeline(id){
   }).filter(Boolean);
   const a=sim.agents[id]||{};
   const ret=a.return_pct||0;
+  const hasMood=rows.some(r=>r.mood&&typeof r.mood==='object');
 
   let body='';
   if(rows.length===0){
@@ -2441,7 +2522,8 @@ function openAgentTimeline(id){
           <th style="min-width:140px;">Orders</th>
           <th class="num" style="width:80px;">Wealth</th>
           <th class="num" style="width:70px;">Round Δ</th>
-          <th class="num" style="width:70px;">Return</th>
+          <th class="num" style="width:70px;">Return</th>`+
+          (hasMood?'<th class="num" style="width:96px;" title="Confidence / Stress / Frustration, 0–10">Mood</th>':'')+`
           <th style="min-width:180px;">Reasoning</th>
         </tr>
       </thead>
@@ -2493,19 +2575,27 @@ function openAgentTimeline(id){
           <td class="num"><b>$${(r.wealth||0).toLocaleString(undefined,{maximumFractionDigits:0})}</b></td>
           <td class="num">${dStr}</td>
           <td class="num">${retStr}</td>
+          ${hasMood?`<td class="num" style="font-size:11px;">${moodCellHtml(r.mood)}</td>`:''}
           <td class="reason">${reasonText}</td>
         </tr>`;
       }).join('')+`</tbody></table>`;
   }
   document.getElementById('tlTitle').innerHTML=
     `<span class="agent-dot" style="background:${color};color:${color};"></span> ${escapeHtml(id)} — Decision Log`;
+  const u=a.usage&&a.usage.total;
+  const usageChip=u&&u.calls
+    ?`<span title="LLM calls, tokens and cost for this agent so far">API: <b>${u.calls}</b> calls ·
+       <b>${(u.total_tokens||0).toLocaleString()}</b> tok ·
+       <b>${a.usage.priced?fmtCost(u.cost_usd):'unpriced'}</b></span>`
+    :'';
   document.getElementById('tlBody').innerHTML=
     `<div class="tl-summary-bar">
       <span>Personality: <b>${escapeHtml(a.personality||'—')}</b></span>
       <span>Wealth: <b>$${(a.wealth||0).toLocaleString(undefined,{maximumFractionDigits:0})}</b></span>
       <span>Return: <b class="${ret>=0?'pos':'neg'}">${ret>=0?'+':''}${ret.toFixed(2)}%</b></span>
       <span>Total Rounds: <b>${rows.length}</b></span>
-    </div>${body}`;
+      ${usageChip}
+    </div>${moodChartSvg(rows)}${body}`;
   document.getElementById('agentTimelineModal').classList.add('show');
 }
 
@@ -2995,10 +3085,36 @@ function triggerLibraryEvent(name){
 }
 
 /* ---- Utility ---- */
+/* Sum the running LLM spend across all agents and show it in the top bar.
+
+   Reads the per-agent totals the last round returned rather than polling
+   /api/usage: the numbers are already in hand, and a chip that lags the
+   round it belongs to would be worse than no chip. A model with no price
+   row still contributes tokens, so the cost is marked as a floor. */
+function updateRunCost(){
+  const el=document.getElementById('runCost');
+  if(!el)return;
+  let calls=0,tokens=0,cost=0,complete=true,any=false;
+  Object.values(sim.agents).forEach(a=>{
+    const t=a.usage&&a.usage.total;
+    if(!t||!t.calls)return;
+    any=true;
+    calls+=t.calls;tokens+=t.total_tokens||0;cost+=t.cost_usd||0;
+    if(t.cost_complete===false)complete=false;
+  });
+  if(!any){el.hidden=true;return;}
+  el.hidden=false;
+  el.innerHTML=`💸 <b>${fmtCost(cost,complete)}</b> · ${tokens.toLocaleString()} tok · ${calls} calls`;
+  el.title=complete
+    ?`${calls} LLM calls this run, ${tokens.toLocaleString()} tokens.`
+    :`${calls} LLM calls this run, ${tokens.toLocaleString()} tokens. Some models have no price row in model_prices.json, so this is a lower bound.`;
+}
+
 function updateTopBar(){
   document.getElementById('topRound').textContent=`Round ${sim.round} / ${sim.total}`;
   const pct=sim.total>0?Math.min(100,Math.round(sim.round/sim.total*100)):0;
   document.getElementById('rpFill').style.width=pct+'%';
+  updateRunCost();
   syncPlayerPanel();
   renderStockList();
   updateStockPanel();
@@ -3031,6 +3147,16 @@ function disableStepButtons(disabled){
 function closeModal(id){document.getElementById(id).classList.remove('show');}
 
 function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+
+/* Render a USD cost. Sub-cent runs are the common case early on, so they get
+   four decimals rather than rounding away to $0.00. `complete=false` marks a
+   total that is missing unpriced models — a floor, not the whole bill. */
+function fmtCost(cost,complete){
+  if(cost===null||cost===undefined)return 'n/a';
+  const n=Number(cost)||0;
+  const text=(n>0&&n<0.01)?'$'+n.toFixed(4):'$'+n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  return complete===false?text+'+':text;
+}
 
 /* ---- Agent social data (feeds the expandable row details) ---- */
 async function loadSocialData(){
@@ -3206,8 +3332,10 @@ const GUIDE_SECTIONS=[
 <ul>
 <li>Click an agent row to expand: cash, holdings, wealth, round Δ, per-stock orders and this round's <b>reasoning</b>, one line per stock.</li>
 <li>In deep mode, <b>Mood</b> bars (0-10: confidence, stress, frustration) move round to round.</li>
-<li>📋 <b>Timeline</b> opens a log of every decision the agent ever made, with reasoning and outcome.</li>
+<li>📋 <b>Timeline</b> opens a log of every decision the agent ever made, with reasoning and outcome. In deep mode it starts with a <b>mood chart</b> tracing confidence, stress and frustration across every round on a fixed 0-10 scale, and each row shows that round's three values beside the trade they went with.</li>
+<li>The timeline header also shows what that agent has cost so far — calls, tokens and dollars.</li>
 <li>💬 Chat (<span class="guide-tag">C</span>) talks to an agent in character via its API.</li>
+<li>💸 The top bar tracks the run's <b>LLM spend</b> — cost, tokens and calls — as it accumulates. A model with no price row in <code>model_prices.json</code> still has its tokens counted; the cost then shows a <code>+</code> to mark it a lower bound.</li>
 </ul>`},
 {id:'grading',icon:'🏆',title:'Agent Grading',html:`
 <p>After every round each agent earns a <b>score 0-100 + grade</b> — shown as a colored badge next to its name and in the leaderboard (hover for the exact score).</p>
@@ -3250,7 +3378,7 @@ const GUIDE_SECTIONS=[
 </ul>`},
 {id:'reports',icon:'📥',title:'Reports & Sharing',html:`
 <ul>
-<li><b>📥 Report</b> exports a single self-contained HTML file: price charts with ⚡ markers, wealth curves, final rankings with grades, the full event timeline and every agent's decision log.</li>
+<li><b>📥 Report</b> exports a single self-contained HTML file: price charts with ⚡ markers, wealth curves, final rankings with grades, per-agent mood timelines, the full event timeline, every agent's decision log, and a tokens &amp; cost table. The header pins the prompt version the run used.</li>
 <li><b>🔗 Copy Link</b> copies a read-only URL of that report snapshot.</li>
 <li>In the results dialog you can also Restart or start a New Simulation.</li>
 </ul>`},

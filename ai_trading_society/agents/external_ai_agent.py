@@ -17,6 +17,8 @@ import time
 from typing import Any, Dict, List, Optional, cast
 
 from ..base_agent import BaseAgent
+from ..prompt_version import PROMPT_TEMPLATE_VERSION, prompt_fingerprint
+from ..usage import UsageTracker, extract_usage
 
 # Provider presets: maps provider name → base_url.
 # base_url=None means use the SDK's default endpoint.
@@ -299,6 +301,28 @@ class ExternalAIAgent(BaseAgent):
         self._repair_calls_remaining: int = max(0, int(repair_budget))
         # Pause before retrying a transient API failure, in seconds.
         self.retry_backoff: float = 1.0
+
+        # Why the call currently in flight was made, so the tracker can
+        # separate decisions from the repair re-asks a badly-behaved model
+        # costs extra. Set around the call rather than passed through
+        # _call_ai_api, whose signature tests stub.
+        self._call_kind = "decision"
+        # Tokens and cost for every call this agent makes, tagged by round.
+        self.usage = UsageTracker(
+            agent_id=agent_id, provider=api_provider, model=self.model
+        )
+        # Which generation of the shipped prompt this agent was built from.
+        self.prompt_template_version = PROMPT_TEMPLATE_VERSION
+
+    @property
+    def prompt_fingerprint(self) -> str:
+        """Content hash of the system prompt actually in use.
+
+        Computed on read, not at construction: the persona layer rewrites
+        ``system_prompt`` after the agent exists, and a fingerprint frozen
+        before that would identify a prompt no round ever saw.
+        """
+        return prompt_fingerprint(self.system_prompt)
 
     # ------------------------------------------------------------------
     # Prompt construction
@@ -837,6 +861,48 @@ class ExternalAIAgent(BaseAgent):
     # API calls
     # ------------------------------------------------------------------
 
+    def _record_call(
+        self,
+        response: Any,
+        prompt_text: str,
+        response_text: str,
+    ) -> None:
+        """File one provider call against this agent's usage tracker.
+
+        Providers that report a usage block are counted exactly; the rest
+        fall back to a character estimate, flagged as such so an estimate is
+        never presented as a billed figure. Accounting must never break a
+        round, so any failure here is swallowed.
+        """
+        try:
+            kind = self._call_kind
+            counts = extract_usage(response)
+            if counts is None:
+                self.usage.record_estimated(
+                    prompt_text, response_text, kind=kind, model=self.model
+                )
+            else:
+                self.usage.record(
+                    prompt_tokens=counts[0],
+                    completion_tokens=counts[1],
+                    kind=kind,
+                    model=self.model,
+                )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _messages_text(messages: Optional[list], prompt: str) -> str:
+        """Flatten a request into text, for the token estimate fallback."""
+        if not messages:
+            return prompt or ""
+        parts = []
+        for m in messages:
+            content = m.get("content") if isinstance(m, dict) else None
+            if isinstance(content, str):
+                parts.append(content)
+        return "\n".join(parts)
+
     def _call_ai_api(
         self,
         prompt: str,
@@ -932,6 +998,58 @@ class ExternalAIAgent(BaseAgent):
             )
         return content
 
+    def _openai_content(self, response: Any) -> str:
+        """Pull the reply text out of an OpenAI-compatible response.
+
+        Tolerates the shapes real providers return: a ChatCompletion
+        object, a plain string, a dict payload from an older SDK or proxy,
+        and reasoning models that put the answer in a reasoning field.
+        """
+        # Some providers return a plain string instead of a ChatCompletion.
+        if isinstance(response, str):
+            return self._reject_html(response)
+
+        # Some older SDKs / proxies expose .json() style dict payloads.
+        if isinstance(response, dict):
+            try:
+                return self._reject_html(response["choices"][0]["message"]["content"])
+            except (KeyError, IndexError, TypeError):
+                raise RuntimeError(
+                    "API returned a dict without a valid 'choices' field: "
+                    f"{str(response)[:200]}"
+                )
+
+        choices = getattr(response, "choices", None)
+        if not choices:
+            raise RuntimeError(
+                "API response has no 'choices' field — the provider may be "
+                "returning an unexpected format. Inspect the response manually."
+            )
+        first = choices[0]
+        message = getattr(first, "message", None)
+        if message is None:
+            # Some providers put content directly on the choice object.
+            content = getattr(first, "text", None) or getattr(first, "content", None)
+            if content is None:
+                raise RuntimeError(
+                    "API response choice has no message/text/content field: "
+                    f"{str(first)[:200]}"
+                )
+            return self._reject_html(content)
+        content = getattr(message, "content", None)
+        if content is None:
+            # Reasoning models (e.g. ArliAI's Derestricted) sometimes return
+            # the answer in a reasoning/reasoning_content/thinking field
+            # instead of content. Fall back to those before giving up.
+            for field in ("reasoning", "reasoning_content", "thinking"):
+                val = getattr(message, field, None)
+                if val:
+                    content = val
+                    break
+        if content is None:
+            content = str(message)
+        return self._reject_html(content)
+
     def _call_openai_compat(
         self,
         prompt: str,
@@ -1004,50 +1122,11 @@ class ExternalAIAgent(BaseAgent):
             kwargs.pop("response_format", None)
             response = client.chat.completions.create(**kwargs)
 
-        # Some providers return a plain string instead of a ChatCompletion object.
-        if isinstance(response, str):
-            return self._reject_html(response)
-
-        # Some older SDKs / proxies also expose .json() style dict payloads.
-        if isinstance(response, dict):
-            try:
-                return self._reject_html(response["choices"][0]["message"]["content"])
-            except (KeyError, IndexError, TypeError):
-                raise RuntimeError(
-                    "API returned a dict without a valid 'choices' field: "
-                    f"{str(response)[:200]}"
-                )
-
-        choices = getattr(response, "choices", None)
-        if not choices:
-            raise RuntimeError(
-                "API response has no 'choices' field — the provider may be "
-                "returning an unexpected format. Inspect the response manually."
-            )
-        first = choices[0]
-        message = getattr(first, "message", None)
-        if message is None:
-            # Some providers put content directly on the choice object.
-            content = getattr(first, "text", None) or getattr(first, "content", None)
-            if content is None:
-                raise RuntimeError(
-                    "API response choice has no message/text/content field: "
-                    f"{str(first)[:200]}"
-                )
-            return self._reject_html(content)
-        content = getattr(message, "content", None)
-        if content is None:
-            # Reasoning models (e.g. ArliAI's Derestricted) sometimes return
-            # the answer in a reasoning/reasoning_content/thinking field
-            # instead of content. Fall back to those before giving up.
-            for field in ("reasoning", "reasoning_content", "thinking"):
-                val = getattr(message, field, None)
-                if val:
-                    content = val
-                    break
-        if content is None:
-            content = str(message)
-        return self._reject_html(content)
+        content = self._openai_content(response)
+        self._record_call(
+            response, self._messages_text(messages, prompt), content
+        )
+        return content
 
     def _call_anthropic(
         self,
@@ -1082,7 +1161,11 @@ class ExternalAIAgent(BaseAgent):
             system=system,
             messages=messages,
         )
-        return str(getattr(response.content[0], "text", ""))
+        content = str(getattr(response.content[0], "text", ""))
+        self._record_call(
+            response, self._messages_text(messages, prompt), content
+        )
+        return content
 
     def _call_google(
         self,
@@ -1138,7 +1221,11 @@ class ExternalAIAgent(BaseAgent):
             response = chat.send_message(prompt)
         else:
             response = model.generate_content(prompt)
-        return str(response.text)
+        content = str(response.text)
+        self._record_call(
+            response, self._messages_text(messages, prompt), content
+        )
+        return content
 
     # ------------------------------------------------------------------
     # Response parsing
@@ -1584,7 +1671,11 @@ class ExternalAIAgent(BaseAgent):
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": instruction},
                 ]
-            response2 = self._call_ai_api("", messages=retry_messages)
+            self._call_kind = "repair"
+            try:
+                response2 = self._call_ai_api("", messages=retry_messages)
+            finally:
+                self._call_kind = "decision"
             try:
                 result = self._parse_response(response2)
                 return result, response2
@@ -1609,6 +1700,10 @@ class ExternalAIAgent(BaseAgent):
         """
         if not self.api_key:
             raise RuntimeError(f"Agent {self.agent_id}: no API key configured")
+
+        # Tag every call this round makes -- including repair re-asks -- with
+        # the round it belongs to, so cost can be read per round afterwards.
+        self.usage.begin_step(observation.get("step"))
 
         prompt = self._build_prompt(observation)
         response = self._call_ai_api_with_retry(prompt)
@@ -1695,8 +1790,12 @@ class ExternalAIAgent(BaseAgent):
             messages.extend(history)
         messages.append({"role": "user", "content": message})
 
-        return self._call_ai_api_with_retry(
-            message, messages=messages, system_prompt=system_prompt
-        )
+        self._call_kind = "chat"
+        try:
+            return self._call_ai_api_with_retry(
+                message, messages=messages, system_prompt=system_prompt
+            )
+        finally:
+            self._call_kind = "decision"
 
 

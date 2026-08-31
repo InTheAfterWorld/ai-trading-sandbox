@@ -61,3 +61,7 @@ check_untyped_defs = true
 
 [tool.setuptools.packages.find]
 include = ["ai_trading_society*"]
+
+[tool.setuptools.package-data]
+# The cost table is data the package reads at runtime, not source.
+ai_trading_society = ["model_prices.json"]

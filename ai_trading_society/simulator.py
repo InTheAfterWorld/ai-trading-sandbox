@@ -246,6 +246,12 @@ class Simulator:
             print(f"{'='*60}")
             print(f"  Run ID         : {self.metadata.run_id}")
             print(f"  Version        : {ver_str}")
+            # The prompt generation these decisions were produced under.
+            # Without it, comparing this run to an older one is guesswork.
+            print(
+                f"  Prompt         : v"
+                f"{version_info.get('prompt_template_version', '?')}"
+            )
             print(f"  Seed           : {self.metadata.seed}")
             print(f"  Initial Price  : ${self.env.config.initial_price:.2f}")
             print(f"  Agents         : {len(self.env.agents)}")
@@ -306,6 +312,8 @@ class Simulator:
                 "total_trades": len(self.env.trade_history),
                 "steps_completed": len(self.state_history),
             }
+            # What the run cost, recorded alongside what it did.
+            self.metadata.attach_usage(list(self.env.agents.values()))
             snapshot_dir = save_run_snapshot(
                 metadata=self.metadata,
                 state_history=self.state_history,
@@ -1020,10 +1028,64 @@ class Simulator:
                 f"{m['win_rate']*100:7.1f}%"
             )
 
+        self._print_usage(ranked)
+
         print(f"\n{'='*60}\n")
 
         if generate_charts:
             self._generate_charts(chart_output_dir)
+
+    def _print_usage(self, ranked: List[Any]) -> None:
+        """Print what the run cost in tokens and dollars, per agent.
+
+        Skipped entirely when nothing called an LLM (an all-offline roster,
+        or a report generated without a run). A model with no price row
+        shows its tokens and ``n/a`` for cost rather than $0.00, and the
+        total is flagged as a floor so it is not read as the whole bill.
+        """
+        from .usage import agent_usage, collect_usage, format_cost
+
+        summary = collect_usage(ranked)
+        total = summary["total"]
+        if not total["calls"]:
+            return
+
+        print("\n  Tokens & Cost:")
+        print(
+            f"  {'Agent':<22}  {'Model':<24}  {'Calls':>6}  "
+            f"{'In':>9}  {'Out':>8}  {'Cost':>10}"
+        )
+        print(f"  {'-'*22}  {'-'*24}  {'-'*6}  {'-'*9}  {'-'*8}  {'-'*10}")
+        for agent in ranked:
+            tracker = agent_usage(agent)
+            if tracker is None or not tracker.total.calls:
+                continue
+            t = tracker.total
+            cost = format_cost(t.cost_usd if t.unpriced_calls == 0 else None)
+            print(
+                f"  {agent.agent_id:<22}  {tracker.model[:24]:<24}  "
+                f"{t.calls:>6}  {t.prompt_tokens:>9,}  "
+                f"{t.completion_tokens:>8,}  {cost:>10}"
+            )
+        print(f"  {'-'*22}  {'-'*24}  {'-'*6}  {'-'*9}  {'-'*8}  {'-'*10}")
+        print(
+            f"  {'TOTAL':<22}  {'':<24}  {total['calls']:>6}  "
+            f"{total['prompt_tokens']:>9,}  {total['completion_tokens']:>8,}  "
+            f"{format_cost(total['cost_usd'], total['cost_complete']):>10}"
+        )
+        if not total["cost_complete"]:
+            # ASCII only: this line lands on a Windows cp1252 console, where
+            # an em dash comes out as mojibake.
+            print(
+                f"    Note: {total['unpriced_calls']} call(s) used a model with "
+                "no price row in model_prices.json;"
+            )
+            print("    their tokens are counted, their cost is not.")
+        if total["estimated_calls"]:
+            print(
+                f"    Note: {total['estimated_calls']} call(s) reported no usage; "
+                "those token counts are estimates."
+            )
 
     def _generate_charts(self, output_dir: str = "charts") -> None:
         """Generate visualization charts after simulation completes."""
