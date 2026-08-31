@@ -170,6 +170,16 @@ still contain breaking changes).
 - A `null` lesson is dropped instead of being stored as the string `"None"` and
   replayed forever.
 - Deep-mode mood bars now render (the fill element was inline).
+- **The dashboard launches under `ATS_REDACT_CONFIG=1` again.** That posture
+  withholds API keys from the browser, but the homepage launch gate, the
+  "N of M traders configured" summary, the sim-page pre-flight toast, and the
+  trader key field all required a literal key string in the browser — so a
+  saved configuration looked unconfigured: launching was blocked and the sim
+  page showed a sticky "No API key found in local configuration." toast. All
+  four now also honor the `has_api_key` flag the redacted config ships, the
+  key field shows a "Saved on server" placeholder, and the toast tells the
+  user where to add a key. The server still backfills blank keys from
+  `user_config.json` by trader name, so keys never reach the browser.
 
 ### Removed
 

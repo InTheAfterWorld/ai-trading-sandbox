@@ -487,7 +487,7 @@ function closeConfig(){document.getElementById('traderConfig').classList.remove(
 function loadStoredConfig(){try{return JSON.parse(localStorage.getItem('ats_config')||'{}');}catch(e){return {};}}
 function renderTraderRows(traders){
   const head=`<div class="trader-row trader-head"><span>Name</span><span>API Key</span><span>Base URL</span><span>Model</span><span>Personality</span><span></span><span></span></div>`;
-  const rows=traders.map((t,i)=>`<div class="trader-row" data-index="${i}" data-provider="${esc(t.provider||'openai')}"><input data-field="name" value="${esc(t.name||`Trade ${i+1}`)}" placeholder="Trade ${i+1}" oninput="autoSaveTraders()"><input data-field="api_key" type="password" value="${esc(t.api_key||'')}" placeholder="API key" oninput="autoSaveTraders()"><input data-field="base_url" value="${esc(t.base_url||'')}" placeholder="Base URL (optional)" oninput="autoSaveTraders()"><input data-field="model" value="${esc(t.model||'gpt-4o')}" placeholder="Model" oninput="autoSaveTraders()"><select data-field="personality" onchange="autoSaveTraders()">${personalityOptions(t.personality||DEFAULT_PERSONALITIES[i]||'balanced')}</select><button class="test-api" onclick="testApi(this)">Test API</button><button class="remove-trader" onclick="removeTrader(this)" title="Remove trader">×</button><div class="test-status"></div>${deepPersonaPanel(t,i)}</div>`).join('');
+  const rows=traders.map((t,i)=>`<div class="trader-row" data-index="${i}" data-provider="${esc(t.provider||'openai')}" data-has-key="${t.has_api_key?'1':''}"><input data-field="name" value="${esc(t.name||`Trade ${i+1}`)}" placeholder="Trade ${i+1}" oninput="autoSaveTraders()"><input data-field="api_key" type="password" value="${esc(t.api_key||'')}" placeholder="${t.has_api_key&&!t.api_key?'Saved on server — type to replace':'API key'}" oninput="autoSaveTraders()"><input data-field="base_url" value="${esc(t.base_url||'')}" placeholder="Base URL (optional)" oninput="autoSaveTraders()"><input data-field="model" value="${esc(t.model||'gpt-4o')}" placeholder="Model" oninput="autoSaveTraders()"><select data-field="personality" onchange="autoSaveTraders()">${personalityOptions(t.personality||DEFAULT_PERSONALITIES[i]||'balanced')}</select><button class="test-api" onclick="testApi(this)">Test API</button><button class="remove-trader" onclick="removeTrader(this)" title="Remove trader">×</button><div class="test-status"></div>${deepPersonaPanel(t,i)}</div>`).join('');
   document.getElementById('traderRows').innerHTML=head+rows;
 }
 const DIAL_NAMES=['risk_appetite','loss_sensitivity','herd_pull','patience','resilience','envy','conviction'];
@@ -539,6 +539,10 @@ function rowData(row){
   const d={};
   row.querySelectorAll('[data-field]').forEach(x=>d[x.dataset.field]=x.value.trim());
   const key = d.api_key || "";
+  // A redacted row (ATS_REDACT_CONFIG deployments) shows a blank key field
+  // while the real key sits server-side; carry the flag so the launch gate
+  // and the summary keep counting this trader as configured.
+  if (!key && row.dataset.hasKey === "1") d.has_api_key = true;
   const url = d.base_url || "";
   // Read the stored provider from the row's data-provider attribute.
   let provider = row.dataset.provider || "openai";
@@ -582,7 +586,7 @@ function autoSaveTraders(){
   renderSummary(traders);
 }
 function saveTraderConfig(){autoSaveTraders();closeConfig();}
-function renderSummary(traders){const configured=(traders||[]).filter(t=>t.api_key).length;document.getElementById('configuredSummary').textContent=`${configured} of ${(traders||[]).length||7} traders configured`;}
+function renderSummary(traders){const configured=(traders||[]).filter(t=>t&&(t.api_key||t.has_api_key)).length;document.getElementById('configuredSummary').textContent=`${configured} of ${(traders||[]).length||7} traders configured`;}
 
 /* ---- Stock configuration ---- */
 // Preset sectors users can pick from when creating a stock.
@@ -730,7 +734,10 @@ function toggleTheme(){
 }
 applyThemeButton();
 function start(){
-  const c=loadStoredConfig();if(!(c.traders||[]).some(t=>t.api_key)){showError('Configure at least one trader API before launching.');return;}
+  // api_key covers the local posture; has_api_key marks traders whose key is
+  // stored server-side only (ATS_REDACT_CONFIG deployments never ship keys to
+  // the browser — /api/start backfills blank keys by trader name).
+  const c=loadStoredConfig();if(!(c.traders||[]).some(t=>t&&(t.api_key||t.has_api_key))){showError('Configure at least one trader API before launching.');return;}
   saveConfig();
   const btn=document.getElementById('btnStart');
   btn.disabled=true;btn.innerHTML='Launching… <span style="font-size:16px;">&#8987;</span>';

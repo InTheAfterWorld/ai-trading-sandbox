@@ -3464,9 +3464,14 @@ window.addEventListener('DOMContentLoaded',async()=>{
   // First-visit tutorial (3 steps), shown once per browser.
   if(!localStorage.getItem('ats_tut_v1'))showTutorial();
 
+  // The key may live in the browser (local posture) or only on the server:
+  // ATS_REDACT_CONFIG deployments never ship keys to the browser, and
+  // /api/start backfills blank keys from user_config.json by trader name.
   const apiKey=getApiKey();
-  if(!apiKey){
-    showToast('No API key found in local configuration.','error',{sticky:true});
+  const hasServerKey=normalizeTraders(loadConfig().traders)
+    .some(t=>t&&typeof t==='object'&&t.has_api_key===true);
+  if(!apiKey&&!hasServerKey){
+    showToast('No API key configured. Go back to the homepage, open "Configure API connections" and add one.','error',{sticky:true});
     return;
   }
   loadEventLibrary();
