@@ -4,8 +4,11 @@ Web UI for AI TRADING SANDBOX.
 A Flask-based dashboard that runs the simulation step-by-step
 with a modern visual interface.
 
-Run:
-    python run.py
+Deployed on Render with gunicorn via the WSGI entry point in
+``ai_trading_society/web/render_app.py`` (see ``render.yaml``). For local
+development, run the dashboard from the package instead:
+
+    python -m ai_trading_society.web.app
 
 Then open http://localhost:5000 in your browser.
 """

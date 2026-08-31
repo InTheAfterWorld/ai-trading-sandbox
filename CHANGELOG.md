@@ -9,6 +9,19 @@ still contain breaking changes).
 
 ### Changed
 
+- **Render-only deployment.** `render.yaml` is now the single deployment
+  config: the build upgrades pip and installs the package from
+  `requirements.txt`, and `FLASK_SECRET_KEY` is auto-generated so browser
+  sessions survive instance restarts mid-simulation. The local entry points
+  that duplicated it are gone — `run.py`, the root `render_app.py` shim, the
+  Heroku-style `Procfile`, and the `.claude/launch.json` that referenced
+  `run.py`. The canonical WSGI entry point is
+  `ai_trading_society.web.render_app:app`; the dashboard runs locally with
+  `python -m ai_trading_society.web.app` and the CLI with
+  `python -m ai_trading_society`. The README Quick Start now leads with the
+  Deploy-to-Render button and documents the free plan's spin-down/ephemeral
+  disk caveats.
+
 - **Per-round records no longer re-copy the whole price series.** Every state
   snapshot stored a full copy of each stock's price history, and the same
   series was shipped twice in every `/api/step` response and kept in the web

@@ -28,7 +28,9 @@ A multi-agent stock market sandbox where autonomous LLM traders with distinct pe
 - [How a Simulation Works](#how-a-simulation-works)
 - [Emergent Behavior](#emergent-behavior)
 - [Quick Start](#quick-start)
+  - [Deploy on Render](#deploy-on-render)
   - [CLI](#cli)
+  - [Local dashboard (development)](#local-dashboard-development)
   - [Keyboard shortcuts (web)](#keyboard-shortcuts-web)
 - [Configuration](#configuration)
 - [Personality Presets](#personality-presets)
@@ -188,30 +190,46 @@ from rules in the sandbox. These behaviors are to be explored.
 
 ## Quick Start
 
-```bash
-pip install -r requirements.txt
-python run.py
-```
+### Deploy on Render
 
-Open http://localhost:5000, click **Configure API connections** to add at least
-one trader API key, optionally configure stocks, then launch.
+The repo ships a Render Blueprint (`render.yaml`) — one click deploys the
+dashboard:
 
-> [!NOTE]
-> The dashboard has no login and hands your saved API keys to anyone who can
-> reach it. `run.py` listens on all network interfaces and reads a `PORT`
-> variable, so keep it on your own machine or a trusted network.
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/InTheAfterWorld/ai-trading-sandbox)
+
+The blueprint installs the package (`pip install -r requirements.txt`) and
+starts `gunicorn ai_trading_society.web.render_app:app`, health-checks
+`/healthz`, auto-deploys every push, pins Python 3.12 via the repo's
+`.python-version`, generates a stable `FLASK_SECRET_KEY`, and sets
+`ATS_REDACT_CONFIG=1` so saved API keys are never sent back to the browser.
+
+First run: open the deployed URL, click **Configure API connections** to add
+at least one trader API key, optionally configure stocks, then launch.
+Settings and keys are stored server-side in `user_config.json`.
+
+> [!WARNING]
+> The dashboard is public at your Render URL, has no login, and running a
+> simulation spends real API credits. Keep the URL private. On the free plan
+> the instance also sleeps after ~15 minutes of inactivity (and restarts on
+> every deploy), which ends an in-progress simulation and resets
+> `user_config.json` — the free plan has no persistent disk.
 
 ### CLI
 
 ```bash
-python run.py --cli                                  # interactive round-by-round run
-python run.py --cli --provider groq --model groq/compound-mini --api-key sk-...
-python -m ai_trading_society                         # equivalent to --cli
+python -m ai_trading_society                         # interactive round-by-round run
 ```
 
-The CLI reads the same `user_config.json` saved by the web homepage. Each round
-pauses with a menu: continue, player trade, inject events, tune parameters,
-show social relations, help, stop.
+Install locally first: `pip install -e ".[ai,config]"`. The CLI reads the same
+`user_config.json` saved by the web homepage. Each round pauses with a menu:
+continue, player trade, inject events, tune parameters, show social relations,
+help, stop.
+
+### Local dashboard (development)
+
+```bash
+python -m ai_trading_society.web.app                 # binds http://localhost:5000
+```
 
 ### Keyboard shortcuts (web)
 
@@ -292,7 +310,7 @@ marked as a lower bound (`$1.23+`). Add your own rows to that file, or point
 `ATS_MODEL_PRICES` at your own:
 
 ```bash
-ATS_MODEL_PRICES=/path/to/my_prices.json python run.py
+ATS_MODEL_PRICES=/path/to/my_prices.json python -m ai_trading_society
 ```
 
 A provider that returns no usage block at all falls back to a character-based
@@ -364,7 +382,7 @@ reload one with `load_run_snapshot()`.
 ## Project Structure
 
 ```
-run.py                    # Web dashboard / CLI entry point
+render.yaml               # Render Blueprint (deployment config)
 ai_trading_society/
 ├── market_env.py         # Engine: observations, matching, pricing
 ├── market_events.py      # Event system (41 templates)
@@ -373,7 +391,9 @@ ai_trading_society/
 ├── model_prices.json     # USD per 1M tokens (user-maintained)
 ├── prompt_version.py     # Prompt generation + fingerprints
 ├── chat_context.py       # Background briefing sent when chatting
+├── __main__.py           # CLI entry point (python -m ai_trading_society)
 ├── web/app.py            # Flask dashboard API
+├── web/render_app.py     # WSGI entry point for Render (gunicorn)
 ├── agents/
 │   ├── external_ai_agent.py   # LLM trader (multi-provider, memory)
 │   ├── traits.py              # Personality wrapper
@@ -381,6 +401,7 @@ ai_trading_society/
 │   └── roster.py              # Roster factory + social map
 └── ...
 templates/                # Web UI pages
+static/                   # Web UI assets
 docs/user_facing_text.md  # All user-visible copy (editable)
 ```
 

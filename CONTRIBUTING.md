@@ -17,7 +17,9 @@ pip install -e ".[dev]"
 Extras: `.[viz]` (charts), `.[config]` (YAML), `.[ai]` (LLM providers),
 `.[all]`.
 
-Run: `python run.py` (web, port 5000), `python run.py --cli`, `python run.py --debug`.
+Run the CLI: `python -m ai_trading_society`. Local dashboard:
+`python -m ai_trading_society.web.app` (http://localhost:5000). The dashboard
+deploys to Render via the Blueprint in `render.yaml`.
 
 ## Checks
 
