@@ -1,5 +1,3 @@
-# Web deployment dependencies.
-flask>=3.0
-# Render production server. Use one worker because simulation sessions are
-# intentionally kept in process memory.
-gunicorn>=23.0
+# Render production dependencies.
+# Install the package itself so all runtime imports are available.
+-e .[web,ai,config]
