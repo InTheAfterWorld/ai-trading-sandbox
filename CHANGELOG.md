@@ -9,6 +9,32 @@ still contain breaking changes).
 
 ### Added
 
+- **Token and cost accounting per agent.** Every provider call is recorded
+  against the agent that made it, tagged with its round and why it was made
+  (decision / repair re-ask / chat). Surfaced as a running total in the
+  dashboard top bar, per agent in the 📋 Timeline modal, as a table at the end
+  of `sim.report()`, in the exported HTML report, and via `GET /api/usage`
+  (which also returns a per-round cost curve).
+  - Prices come from `ai_trading_society/model_prices.json` (USD per 1M
+    tokens), overridable with `ATS_MODEL_PRICES`. The shipped table carries
+    only rows verifiable against a first-party source, so most models start
+    unpriced: an unpriced model is still counted in full, but its cost reads
+    as unknown rather than zero, and totals containing one are marked as a
+    lower bound.
+  - A provider that reports no usage block falls back to a character-based
+    token estimate, flagged as an estimate everywhere it surfaces.
+- **Prompt versioning.** `PROMPT_TEMPLATE_VERSION` plus a content fingerprint
+  of the prompt each agent actually ran on are recorded per agent in
+  `runs/<run_id>/metadata.json`, printed at CLI run start, and shown in the
+  exported report's header — so a run's decision log can always be read
+  against the prompt that produced it. A per-agent `source` separates the
+  shipped template, a persona-prefixed one, and a fully custom prompt.
+- **Mood timeline.** In deep mode an agent's 📋 Timeline now opens with a chart
+  tracing all three mood axes (confidence / stress / frustration) round by
+  round on a pinned 0–10 axis, with a per-round Mood column beside the trades
+  and the current value plus drift-since-round-one in the legend. The exported
+  HTML report gains a matching **Mood Timeline** section.
+
 - **Deep personality mode** (`deep_persona`, a homepage checkbox, off by
   default). When on, each trader also gets:
   - seven sensitivity dials — `risk_appetite`, `loss_sensitivity`, `herd_pull`,

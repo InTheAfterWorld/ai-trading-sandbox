@@ -231,7 +231,7 @@ def print_report(samples: dict) -> None:
     for i, a in enumerate(axes):
         for b in axes[i + 1:]:
             r = abs(_pearson(cols[a], cols[b]))
-            print(f"  {a}/{b:<24} {r:5.2f}  "
+            print(f"  {a + '/' + b:<26} {r:5.2f}  "
                   f"-> {'PASS' if r < MAX_CORR else 'FAIL'}")
     print()
 
@@ -263,10 +263,14 @@ def _fit_score(samples: dict) -> float:
 
 def fit() -> dict:
     """Grid-search _BASE_POINT and a global _NORMAL scale; write suggestions."""
-    grid = [
+    # The shipped constants are always a candidate, so a search that finds
+    # nothing better recommends leaving mood.py alone instead of drifting
+    # to the nearest grid point.
+    grid = [(_ORIGINAL_BASE_POINT, 1.0)] + [
         (bp, ns)
         for bp in (0.5, 0.75, 1.0, 1.5, 2.0)
         for ns in (0.5, 1.0, 2.0)
+        if (bp, ns) != (_ORIGINAL_BASE_POINT, 1.0)
     ]
     best = None
     for base_point, normal_scale in grid:

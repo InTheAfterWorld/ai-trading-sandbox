@@ -16,6 +16,7 @@ import re
 import sys
 import uuid
 from collections import OrderedDict
+from typing import Any
 
 try:
     from flask import Flask, jsonify, render_template, request, send_file
@@ -45,8 +46,13 @@ from ai_trading_society.console_utils import (
 )
 from ai_trading_society.market_env import MarketEnv
 from ai_trading_society.market_events import EVENT_TEMPLATES
+from ai_trading_society.prompt_version import (
+    PROMPT_TEMPLATE_VERSION,
+    shipped_fingerprints,
+)
 from ai_trading_society.report_export import generate_report_html, save_report
 from ai_trading_society.simulator import Simulator, grade_performance, grade_wealth_curve
+from ai_trading_society.usage import agent_usage, collect_usage
 
 app = Flask(__name__, template_folder="../../templates", static_folder="../../static")
 # Never fall back to a hard-coded secret: it would let an attacker on the
@@ -218,6 +224,26 @@ def _aggregate_actions(stock_acts, first_symbol: str = "ATSX"):
             "reasoning": stock_acts.get("reasoning", ""),
         }],
     )
+
+
+def _usage_payload(agent, step: int | None = None):
+    """Compact token/cost snapshot for one agent, or None if it makes no calls.
+
+    Deliberately smaller than ``UsageTracker.to_dict()``: this rides along
+    with every round, so it carries the running total plus this round's
+    slice and leaves the per-kind breakdown to ``/api/usage``.
+    """
+    tracker = agent_usage(agent)
+    if tracker is None:
+        return None
+    payload: dict[str, Any] = {
+        "model": tracker.model,
+        "priced": tracker.total.unpriced_calls == 0 and tracker.total.calls > 0,
+        "total": tracker.total.to_dict(),
+    }
+    if step is not None:
+        payload["round"] = tracker.step_totals(step).to_dict()
+    return payload
 
 
 @app.before_request
@@ -489,7 +515,7 @@ def api_start():
                 continue
             seen.add(name)
             try:
-                s_price = float(s.get("price", s.get("initial_price", price)))
+                s_price = float(s.get("price") or s.get("initial_price") or price)
             except (TypeError, ValueError):
                 s_price = price
             try:
@@ -739,6 +765,8 @@ def api_step():
             "grade": g["grade"],
             # Deep-mode persona mood; None in simple runs.
             "mood": getattr(agent, "mood", None) if getattr(agent, "deep", False) else None,
+            # Tokens and cost: this round's slice plus the running total.
+            "usage": _usage_payload(agent, current_step),
         })
 
     # Update prev_wealths.
@@ -881,7 +909,7 @@ def api_results():
     avg_vol = sum(env.volume_history) / len(env.volume_history) if env.volume_history else 0
 
     # Build wealth history for chart.
-    wealth_history = {}
+    wealth_history: dict[str, list[dict[str, float]]] = {}
     for aid in env.agents:
         wealth_history[aid] = []
     for snapshot in sim.state_history:
@@ -922,6 +950,53 @@ def api_history():
         "history": state.get("history", []),
         "current_step": state.get("current_step", 0),
         "total_steps": state.get("steps", 0),
+    })
+
+
+@app.route("/api/usage", methods=["GET"])
+def api_usage():
+    """Token and cost accounting for the run so far.
+
+    ``cost_complete`` is false when some model had no price row, in which
+    case the reported cost is a floor rather than the whole bill.
+    """
+    state = _get_session()
+    if "env" not in state:
+        return jsonify({"error": "No active simulation"}), 400
+    env: MarketEnv = state["env"]
+
+    agents = list(env.agents.values())
+    summary = collect_usage(agents)
+
+    # Per-round cost curve, so the dashboard can show spend accumulating.
+    by_round: list[dict[str, Any]] = []
+    for step in range(1, state.get("current_step", 0) + 1):
+        cost = 0.0
+        tokens = 0
+        complete = True
+        for agent in agents:
+            tracker = agent_usage(agent)
+            if tracker is None:
+                continue
+            totals = tracker.step_totals(step)
+            cost += totals.cost_usd
+            tokens += totals.total_tokens
+            complete = complete and totals.unpriced_calls == 0
+        by_round.append({
+            "step": step,
+            "cost_usd": round(cost, 6),
+            "tokens": tokens,
+            "cost_complete": complete,
+        })
+
+    return jsonify({
+        "total": summary["total"],
+        "agents": summary["agents"],
+        "by_round": by_round,
+        "prompt": {
+            "template_version": PROMPT_TEMPLATE_VERSION,
+            "fingerprints": shipped_fingerprints(),
+        },
     })
 
 
@@ -982,11 +1057,14 @@ def api_report_export():
                     pts.append(a.get("wealth", pts[-1]))
         wealth_history[aid] = pts
 
-    # Decision log per agent: one row per round.
-    agent_logs = {}
+    # Decision log per agent: one row per round, plus the mood trace beside
+    # it so the report can show what the trader felt as well as what it did.
+    agent_logs: dict[str, list[dict[str, Any]]] = {}
+    mood_history: dict[str, list[dict[str, Any]]] = {}
     for snap in state.get("history", []):
         for a in snap.get("agents", []):
-            agent_logs.setdefault(a.get("id", "?"), []).append({
+            aid = a.get("id", "?")
+            agent_logs.setdefault(aid, []).append({
                 "round": snap.get("step", 0),
                 "action": a.get("action", "hold"),
                 "requested": a.get("requested", 0),
@@ -997,7 +1075,14 @@ def api_report_export():
                 "actions": a.get("actions", []),
                 "wealth": a.get("wealth", 0),
                 "delta": a.get("delta"),
+                "mood": a.get("mood"),
             })
+            mood = a.get("mood")
+            if isinstance(mood, dict) and mood:
+                mood_history.setdefault(aid, []).append({
+                    "step": snap.get("step", 0),
+                    **{k: float(v) for k, v in mood.items()},
+                })
 
     buy_trades = [t for t in env.trade_history if t.action == "buy"]
     sell_trades = [t for t in env.trade_history if t.action == "sell"]
@@ -1011,6 +1096,12 @@ def api_report_export():
         list(env.event_manager.event_history) if env.event_manager else []
     )
 
+    usage = collect_usage(list(env.agents.values()))
+    if metadata is not None:
+        # Fold the final numbers into the run snapshot too, so a saved
+        # metadata.json and its report agree on what the run cost.
+        metadata.attach_usage(list(env.agents.values()))
+
     html_text = generate_report_html(
         run_id=run_id,
         seed=seed,
@@ -1022,6 +1113,12 @@ def api_report_export():
         event_history=event_history,
         agent_logs=agent_logs,
         trade_summary=trade_summary,
+        mood_history=mood_history,
+        usage=usage,
+        prompt_info={
+            "template_version": PROMPT_TEMPLATE_VERSION,
+            "fingerprints": shipped_fingerprints(),
+        },
     )
     save_report(html_text, run_id, reports_dir=REPORTS_DIR)
     return jsonify({

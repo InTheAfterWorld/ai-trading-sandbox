@@ -58,6 +58,14 @@ body.dark ::-webkit-scrollbar-thumb:hover{background:#3a5d91;}
 }
 .logo{display:flex;align-items:center;gap:8px;font-size:17px;font-weight:700;color:#1565C0;white-space:nowrap;cursor:pointer;user-select:none;}
 .logo img{width:20px;height:20px;object-fit:contain;display:block;}
+/* Running LLM spend, so the bill is visible while it is being run up. */
+.run-cost{
+  display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:600;
+  color:var(--text-dim);background:rgba(148,163,184,.12);
+  border:1px solid var(--border);border-radius:8px;padding:4px 9px;white-space:nowrap;
+}
+.run-cost b{color:var(--text);}
+.run-cost[hidden]{display:none;}
 /* ---------- Theme switch (top bar) ---------- */
 .theme-switch{position:relative;display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0;}
 .theme-switch input{position:absolute;opacity:0;width:0;height:0;}
@@ -409,13 +417,11 @@ td.reason{font-size:11px;color:var(--text-dim);font-style:italic;line-height:1.4
   display:none;white-space:nowrap;
 }
 .wait-window.show.auto-running .ww-stop{display:inline-block;}
-/* Full-screen transparent click-blocker shown while AI is thinking. */
-.think-overlay{
-  position:fixed;inset:0;z-index:240;display:none;
-  /* transparent but still catches pointer events */
-  background:rgba(11,14,20,0);
+/* Full-screen click-blocker removed: while AI is thinking the page stays
+   interactive; agent-affecting controls (chat) are disabled via body.thinking. */
+body.thinking .social-fab{
+  opacity:.45;pointer-events:none;cursor:not-allowed;
 }
-.think-overlay.show{display:block;}
 .ww-title{font-size:13px;font-weight:700;}
 .ww-sub{font-size:11px;color:var(--text-dim);margin-top:2px;}
 .spinner{width:22px;height:22px;border-radius:50%;border:3px solid var(--border);border-top-color:var(--purple);animation:spin .8s linear infinite;flex-shrink:0;}
@@ -705,6 +711,23 @@ body.dark .guide-tag{background:#f0f3f9;}
 }
 .pf-queued.show{display:flex;}
 .pf-note{font-size:10.5px;color:var(--text-dim);margin-top:9px;font-style:italic;}
+.pf-stock-select{
+  flex:1;min-width:0;background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;
+  padding:7px 9px;color:var(--text);font-size:12px;font-weight:700;outline:none;font-family:inherit;cursor:pointer;
+}
+.pf-stock-select:focus{border-color:var(--purple);}
+.pf-holdings{margin:2px 0 12px;border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+.pf-h-row{
+  display:flex;align-items:center;gap:8px;padding:6px 10px;font-size:11px;
+  border-bottom:1px solid var(--border);cursor:pointer;transition:background .15s;
+}
+.pf-h-row:last-child{border-bottom:none;}
+.pf-h-row:hover,.pf-h-row.active{background:var(--bg-secondary);}
+.pf-h-row.active{box-shadow:inset 3px 0 0 var(--purple);}
+.pf-h-name{font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.pf-h-qty{color:var(--text-dim);white-space:nowrap;}
+.pf-h-val{font-weight:700;white-space:nowrap;}
+.pf-h-empty{padding:8px 10px;font-size:10.5px;color:var(--text-dim);font-style:italic;}
 
 /* ---------- Event tab strip + full timeline ---------- */
 .tab-row{display:flex;gap:6px;margin-bottom:10px;}
@@ -803,6 +826,7 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
     <span class="rp-label" id="topRound">Round 0 / 0</span>
   </span>
   <span class="spacer"></span>
+  <span class="run-cost" id="runCost" hidden title="LLM tokens and cost for this run so far"></span>
   <label class="theme-switch" title="Toggle light / dark mode">
     <input type="checkbox" id="themeSwitch" onchange="toggleTheme()">
     <span class="ts-slider"><span class="ts-sun">☀️</span><span class="ts-moon">🌙</span></span>
@@ -842,31 +866,6 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
         <canvas id="candleChart"></canvas>
         <div class="candle-tip" id="candleTip"></div>
       </div>
-    </div>
-    <!-- Player trading panel -->
-    <div class="card" id="portfolioCard">
-      <div class="card-title">💼 Your Portfolio <span class="badge" id="pfStockBadge">Stock 1</span></div>
-      <div class="pf-grid">
-        <div class="pf-cell"><span class="pf-label">Cash</span><span class="pf-val" id="pfCash">—</span></div>
-        <div class="pf-cell"><span class="pf-label">Shares</span><span class="pf-val" id="pfShares">—</span></div>
-        <div class="pf-cell"><span class="pf-label">Wealth</span><span class="pf-val" id="pfWealth">—</span></div>
-        <div class="pf-cell"><span class="pf-label">Return</span><span class="pf-val" id="pfReturn">—</span></div>
-      </div>
-      <div class="pf-actions">
-        <input class="pf-qty" id="pfQty" type="number" min="0" step="1" placeholder="Qty" title="Number of shares">
-        <div class="pf-side" title="Quick-fill percentages use this side (buying power or holdings)">
-          <button type="button" id="pfSideBuy" class="active" onclick="setPfSide('buy')">Buy side</button>
-          <button type="button" id="pfSideSell" onclick="setPfSide('sell')">Sell side</button>
-        </div>
-        <button class="pf-chip" onclick="fillPfQty(0.25)">25%</button>
-        <button class="pf-chip" onclick="fillPfQty(0.5)">50%</button>
-        <button class="pf-chip" onclick="fillPfQty(1)">Max</button>
-        <span style="flex:1"></span>
-        <button class="btn btn-sm btn-buy" id="pfBuyBtn" onclick="submitPlayerAction('buy')">▲ Buy</button>
-        <button class="btn btn-sm btn-sell" id="pfSellBtn" onclick="submitPlayerAction('sell')">▼ Sell</button>
-      </div>
-      <div class="pf-queued" id="pfQueued"></div>
-      <div class="pf-note">Orders are queued and execute on the next round · fees &amp; slippage apply.</div>
     </div>
     <div class="card" id="agentsCard">
       <div class="card-title">
@@ -910,6 +909,32 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
         </div>
       </div>
     </div>
+    <!-- Player trading panel (multi-stock) -->
+    <div class="card" id="portfolioCard">
+      <div class="card-title">💼 Your Portfolio <span class="badge" id="pfStockBadge">Stock 1</span></div>
+      <div class="pf-grid">
+        <div class="pf-cell"><span class="pf-label">Cash</span><span class="pf-val" id="pfCash">—</span></div>
+        <div class="pf-cell"><span class="pf-label">Wealth</span><span class="pf-val" id="pfWealth">—</span></div>
+        <div class="pf-cell"><span class="pf-label">Return</span><span class="pf-val" id="pfReturn">—</span></div>
+      </div>
+      <div class="pf-holdings" id="pfHoldings"></div>
+      <div class="pf-actions">
+        <select class="pf-stock-select" id="pfStock" title="Stock to trade" onchange="onPfStockChange()"></select>
+        <input class="pf-qty" id="pfQty" type="number" min="0" step="1" placeholder="Qty" title="Number of shares">
+        <div class="pf-side" title="Quick-fill percentages use this side (buying power or holdings)">
+          <button type="button" id="pfSideBuy" class="active" onclick="setPfSide('buy')">Buy side</button>
+          <button type="button" id="pfSideSell" onclick="setPfSide('sell')">Sell side</button>
+        </div>
+        <button class="pf-chip" onclick="fillPfQty(0.25)">25%</button>
+        <button class="pf-chip" onclick="fillPfQty(0.5)">50%</button>
+        <button class="pf-chip" onclick="fillPfQty(1)">Max</button>
+        <span style="flex:1"></span>
+        <button class="btn btn-sm btn-buy" id="pfBuyBtn" onclick="submitPlayerAction('buy')">▲ Buy</button>
+        <button class="btn btn-sm btn-sell" id="pfSellBtn" onclick="submitPlayerAction('sell')">▼ Sell</button>
+      </div>
+      <div class="pf-queued" id="pfQueued"></div>
+      <div class="pf-note">Orders are queued and execute on the next round · fees &amp; slippage apply.</div>
+    </div>
     <div class="card">
       <div class="card-title">🏆 Leaderboard</div>
       <div id="rankingList"><div class="empty-hint">No data yet.</div></div>
@@ -935,9 +960,6 @@ try{if(localStorage.getItem('ats_theme')==='dark')document.body.classList.add('d
 
 <!-- Toasts (top-right) -->
 <div class="toast-container" id="toastContainer"></div>
-
-<!-- Transparent overlay shown while AI is thinking (blocks all clicks). -->
-<div class="think-overlay" id="thinkOverlay"></div>
 
 <!-- Small waiting window -->
 <div class="wait-window" id="waitWindow">
@@ -1247,10 +1269,9 @@ function setThinking(on){
   const btn=document.getElementById('btnStep');
   btn.disabled=on||!sim.running;
   btn.innerHTML=on?'<span class="btn-spinner"></span> Thinking…':'Next Round ▶';
-  // The full-screen click-blocker is only needed for manual play; during
-  // auto-play it would swallow clicks on the Pause button.
-  const ov=document.getElementById('thinkOverlay');
-  if(ov)ov.classList.toggle('show',on&&!autoActive);
+  // No full-screen blocker: the page stays interactive while agents think;
+  // only agent-affecting controls (chat) are disabled via body.thinking.
+  document.body.classList.toggle('thinking',on);
 }
 
 function stopAuto(){
@@ -1263,8 +1284,6 @@ function stopAuto(){
     if(btn)btn.disabled=true;
     const spd=document.getElementById('speedSelect');
     if(spd)spd.disabled=true;
-    const ov=document.getElementById('thinkOverlay');
-    if(ov)ov.classList.add('show');
   }
   document.getElementById('waitWindow').classList.remove('auto-running');
 }
@@ -1346,7 +1365,7 @@ async function startSim(opts){
     renderPortfolio();
     updateTopBar();
     document.getElementById('agentCount').textContent=Object.keys(sim.agents).length;
-    document.getElementById('pfStockBadge').textContent=sim.selectedStock;
+    populatePfStocks();
     loadSocialData();
     requestAnimationFrame(()=>{drawCandles();});
 
@@ -1437,7 +1456,11 @@ async function runStep(){
       events:data.events||[],
       agents:(data.agents||[]).map(a=>({id:a.id,action:a.action,requested:a.requested,filled:a.filled,
         reasoning:a.reasoning,wealth:a.wealth,delta:a.delta,return_pct:a.return_pct,is_player:a.is_player,cash:a.cash,holdings:a.holdings,
-        actions:a.actions||[]})),
+        actions:a.actions||[],
+        // Mood is a per-round value, not a current one: keep a copy per
+        // snapshot so the agent timeline can trace how it moved.
+        mood:a.mood?{...a.mood}:null,
+        usage:a.usage||null})),
     });
 
     // A queued player order (if any) took effect this round.
@@ -1476,8 +1499,6 @@ function toggleAuto(){
     if(sim.thinking){
       document.getElementById('btnAuto').disabled=true;
       document.getElementById('speedSelect').disabled=true;
-      const ov=document.getElementById('thinkOverlay');
-      if(ov)ov.classList.add('show');
     }
   }else{
     sim.autoTimer=setInterval(()=>runStep(),sim.autoInterval);
@@ -1487,8 +1508,6 @@ function toggleAuto(){
     if(sim.thinking){
       document.getElementById('btnAuto').disabled=false;
       document.getElementById('speedSelect').disabled=false;
-      const ov=document.getElementById('thinkOverlay');
-      if(ov)ov.classList.remove('show');
     }
   }
   document.getElementById('waitWindow').classList.toggle('auto-running',sim.thinking&&!!sim.autoTimer);
@@ -2166,28 +2185,84 @@ function playerAgent(){
 }
 
 /* =========================================================
-   Your Portfolio — player trading panel (P0)
+   Your Portfolio — player trading panel (multi-stock)
    ========================================================= */
+function pfStockId(){
+  const sel=document.getElementById('pfStock');
+  if(sel&&sel.value)return sel.value;
+  return STOCKS[0]?STOCKS[0].id:sim.selectedStock;
+}
+function pfPriceFor(id){
+  const info=sim.stockPrices&&sim.stockPrices[id];
+  return info?info.last:currentPrice();
+}
+function pfHoldingQty(p,id){
+  const h=p&&p.holdings;
+  if(!h||typeof h!=='object')return 0;
+  const v=h[id];
+  return typeof v==='number'?v:0;
+}
+function populatePfStocks(){
+  const sel=document.getElementById('pfStock');
+  if(!sel)return;
+  const cur=sel.value;
+  sel.innerHTML=STOCKS.map(s=>{
+    const p=pfPriceFor(s.id);
+    return `<option value="${s.id}">${s.id} — $${p.toFixed(2)}</option>`;
+  }).join('');
+  sel.value=STOCKS.some(s=>s.id===cur)?cur:(STOCKS[0]?STOCKS[0].id:'');
+}
+function onPfStockChange(){
+  renderPortfolio();
+}
+
 function renderPortfolio(){
   const p=playerAgent();
   const cashEl=document.getElementById('pfCash');
   if(!cashEl)return;
-  if(!p){['pfCash','pfShares','pfWealth','pfReturn'].forEach(id=>{document.getElementById(id).textContent='—';});return;}
+  if(!p){['pfCash','pfWealth','pfReturn'].forEach(id=>{document.getElementById(id).textContent='—';});return;}
   document.getElementById('pfCash').textContent='$'+(p.cash||0).toLocaleString(undefined,{maximumFractionDigits:0});
-  document.getElementById('pfShares').textContent=holdingQty(p).toFixed(0);
   document.getElementById('pfWealth').textContent='$'+(p.wealth||0).toLocaleString(undefined,{maximumFractionDigits:0});
   const ret=p.return_pct||0;
   const retEl=document.getElementById('pfReturn');
   retEl.textContent=(ret>=0?'+':'')+ret.toFixed(2)+'%';
   retEl.className='pf-val '+(ret>=0?'pos':'neg');
 
+  // Per-stock holdings table (click a row to select that stock for trading).
+  const sel=document.getElementById('pfStock');
+  const active=pfStockId();
+  populatePfStocks();
+  if(sel)sel.value=active;
+  document.getElementById('pfStockBadge').textContent=active;
+  const holdEl=document.getElementById('pfHoldings');
+  if(holdEl){
+    const rows=STOCKS.map(s=>{
+      const qty=pfHoldingQty(p,s.id);
+      const price=pfPriceFor(s.id);
+      const val=qty*price;
+      return `
+      <div class="pf-h-row${active===s.id?' active':''}" onclick="selectPfStock('${s.id}')" title="Click to trade ${s.id}">
+        <span class="pf-h-name">${s.id}</span>
+        <span class="pf-h-qty">${qty.toFixed(0)} sh @ $${price.toFixed(2)}</span>
+        <span class="pf-h-val">$${val.toLocaleString(undefined,{maximumFractionDigits:0})}</span>
+      </div>`;
+    }).join('');
+    holdEl.innerHTML=rows||'<div class="pf-h-empty">No stocks listed.</div>';
+  }
+
   const q=document.getElementById('pfQueued');
   if(sim.playerQueued){
-    q.textContent=`⏳ Queued: ${sim.playerQueued.action.toUpperCase()} ${sim.playerQueued.qty} ${sim.selectedStock} — executes next round`;
+    q.textContent=`⏳ Queued: ${sim.playerQueued.action.toUpperCase()} ${sim.playerQueued.qty} ${sim.playerQueued.stock} — executes next round`;
     q.classList.add('show');
   }else{
     q.classList.remove('show');
   }
+}
+
+function selectPfStock(id){
+  const sel=document.getElementById('pfStock');
+  if(sel)sel.value=id;
+  renderPortfolio();
 }
 
 function setPfSide(side){
@@ -2198,10 +2273,11 @@ function setPfSide(side){
 
 function fillPfQty(frac){
   const p=playerAgent();
-  const price=currentPrice();
+  const id=pfStockId();
+  const price=pfPriceFor(id);
   let max;
   if(sim.pfSide==='sell'){
-    max=holdingQty(p);
+    max=pfHoldingQty(p,id);
   }else{
     max=price>0?Math.floor((p?(p.cash||0):0)/price):0;
   }
@@ -2210,23 +2286,25 @@ function fillPfQty(frac){
 
 async function submitPlayerAction(action){
   if(!sim.running){showToast('Simulation is not running — start a new one first.','error');return;}
+  const stockId=pfStockId();
   const qtyEl=document.getElementById('pfQty');
   const qty=parseInt(qtyEl.value,10);
   if(!qty||qty<=0){showToast('Enter a quantity greater than 0 first.','error');qtyEl.focus();return;}
   if(action==='sell'){
     const p=playerAgent();
-    if(holdingQty(p)<qty){showToast(`You only hold ${holdingQty(p).toFixed(0)} shares.`,'error');return;}
+    const held=pfHoldingQty(p,stockId);
+    if(held<qty){showToast(`You only hold ${held.toFixed(0)} shares of ${stockId}.`,'error');return;}
   }
   try{
     const resp=await fetch('/api/player_action',{
       method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action,quantity:qty,name:sim.selectedStock}),
+      body:JSON.stringify({action,quantity:qty,name:stockId}),
     });
     const data=await resp.json();
     if(data.error){showError(data.error);return;}
-    sim.playerQueued={action,qty};
+    sim.playerQueued={action,qty,stock:stockId};
     renderPortfolio();
-    showToast(`Order queued: ${action.toUpperCase()} ${qty} — it executes on the next round.`,'success');
+    showToast(`Order queued: ${action.toUpperCase()} ${qty} ${stockId} — it executes on the next round.`,'success');
   }catch(e){showError('Order failed: '+e.message);}
 }
 
@@ -2355,6 +2433,73 @@ function renderReplay(snap){
 /* =========================================================
    Agent timeline — per-round decision log
    ========================================================= */
+/* The three mood axes, in the order they are drawn and labelled. Colors
+   match the report export so a run reads the same in both places. */
+const MOOD_AXES=[
+  {key:'confidence',label:'Confidence',color:'#22c55e'},
+  {key:'stress',    label:'Stress',    color:'#f59e0b'},
+  {key:'frustration',label:'Frustration',color:'#ef4444'},
+];
+
+/* Trace all three mood axes across the run as one inline SVG.
+
+   The y-axis is pinned to 0-10 rather than fitted to the data: mood is a
+   bounded scale, and autoscaling would turn a half-point drift into what
+   looks like a collapse. Rounds before deep mode recorded a mood are
+   skipped, so a gap never reads as a zero. */
+function moodChartSvg(rows){
+  const pts=rows.filter(r=>r.mood&&typeof r.mood==='object'&&MOOD_AXES.some(x=>r.mood[x.key]!=null));
+  if(pts.length===0)return '';
+  const W=760,H=180,padL=30,padR=10,padT=10,padB=20;
+  const w=W-padL-padR,h=H-padT-padB;
+  const n=pts.length;
+  const X=i=>padL+(n<2?w/2:w*i/(n-1));
+  const Y=v=>padT+h-h*(Math.min(Math.max(v,0),10)/10);
+
+  let g='';
+  for(let v=0;v<=10;v+=5){
+    g+=`<line x1="${padL}" y1="${Y(v).toFixed(1)}" x2="${W-padR}" y2="${Y(v).toFixed(1)}" stroke="rgba(148,163,184,.25)" stroke-width="1"/>`
+      +`<text x="${padL-6}" y="${(Y(v)+3.5).toFixed(1)}" fill="#94a3b8" font-size="9" text-anchor="end">${v}</text>`;
+  }
+  // Round labels along the bottom, thinned so they never collide.
+  const every=Math.max(1,Math.ceil(n/12));
+  for(let i=0;i<n;i+=every){
+    g+=`<text x="${X(i).toFixed(1)}" y="${H-5}" fill="#94a3b8" font-size="9" text-anchor="middle">${pts[i].round}</text>`;
+  }
+
+  let lines='';
+  MOOD_AXES.forEach(ax=>{
+    const d=pts.map((p,i)=>`${X(i).toFixed(1)},${Y(Number(p.mood[ax.key])||0).toFixed(1)}`).join(' ');
+    lines+=`<polyline points="${d}" fill="none" stroke="${ax.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+    if(n===1)lines+=`<circle cx="${X(0).toFixed(1)}" cy="${Y(Number(pts[0].mood[ax.key])||0).toFixed(1)}" r="3" fill="${ax.color}"/>`;
+  });
+
+  const last=pts[pts.length-1].mood, first=pts[0].mood;
+  const legend=MOOD_AXES.map(ax=>{
+    const now=Number(last[ax.key])||0, was=Number(first[ax.key])||0, d=now-was;
+    const arrow=Math.abs(d)<0.05?'→':(d>0?'↑':'↓');
+    return `<span style="display:inline-flex;align-items:center;gap:5px;">
+      <span style="width:9px;height:9px;border-radius:2px;background:${ax.color};"></span>
+      <b>${ax.label}</b> ${now.toFixed(1)}
+      <span class="muted">${arrow}${Math.abs(d).toFixed(1)}</span></span>`;
+  }).join('');
+
+  return `<div style="margin:2px 0 12px;">
+    <div class="sa-mood-title">Mood over ${n} round${n===1?'':'s'} (0–10)</div>
+    <div style="overflow-x:auto;"><svg viewBox="0 0 ${W} ${H}" width="100%" role="img"
+      aria-label="Confidence, stress and frustration per round">${g}${lines}</svg></div>
+    <div style="display:flex;flex-wrap:wrap;gap:14px;font-size:11px;margin-top:4px;">${legend}</div>
+  </div>`;
+}
+
+/* Compact per-round mood readout for the decision-log table. */
+function moodCellHtml(mood){
+  if(!mood||typeof mood!=='object')return '<span class="muted">—</span>';
+  const bits=MOOD_AXES.filter(ax=>mood[ax.key]!=null).map(ax=>
+    `<span style="color:${ax.color};font-weight:700;" title="${ax.label}">${(Number(mood[ax.key])||0).toFixed(1)}</span>`);
+  return bits.length?bits.join('<span class="muted"> / </span>'):'<span class="muted">—</span>';
+}
+
 function openAgentTimeline(id){
   sim.tlAgentId=id;
   const color=sim.agentColors[id]||'#888';
@@ -2364,6 +2509,7 @@ function openAgentTimeline(id){
   }).filter(Boolean);
   const a=sim.agents[id]||{};
   const ret=a.return_pct||0;
+  const hasMood=rows.some(r=>r.mood&&typeof r.mood==='object');
 
   let body='';
   if(rows.length===0){
@@ -2376,7 +2522,8 @@ function openAgentTimeline(id){
           <th style="min-width:140px;">Orders</th>
           <th class="num" style="width:80px;">Wealth</th>
           <th class="num" style="width:70px;">Round Δ</th>
-          <th class="num" style="width:70px;">Return</th>
+          <th class="num" style="width:70px;">Return</th>`+
+          (hasMood?'<th class="num" style="width:96px;" title="Confidence / Stress / Frustration, 0–10">Mood</th>':'')+`
           <th style="min-width:180px;">Reasoning</th>
         </tr>
       </thead>
@@ -2428,19 +2575,27 @@ function openAgentTimeline(id){
           <td class="num"><b>$${(r.wealth||0).toLocaleString(undefined,{maximumFractionDigits:0})}</b></td>
           <td class="num">${dStr}</td>
           <td class="num">${retStr}</td>
+          ${hasMood?`<td class="num" style="font-size:11px;">${moodCellHtml(r.mood)}</td>`:''}
           <td class="reason">${reasonText}</td>
         </tr>`;
       }).join('')+`</tbody></table>`;
   }
   document.getElementById('tlTitle').innerHTML=
     `<span class="agent-dot" style="background:${color};color:${color};"></span> ${escapeHtml(id)} — Decision Log`;
+  const u=a.usage&&a.usage.total;
+  const usageChip=u&&u.calls
+    ?`<span title="LLM calls, tokens and cost for this agent so far">API: <b>${u.calls}</b> calls ·
+       <b>${(u.total_tokens||0).toLocaleString()}</b> tok ·
+       <b>${a.usage.priced?fmtCost(u.cost_usd):'unpriced'}</b></span>`
+    :'';
   document.getElementById('tlBody').innerHTML=
     `<div class="tl-summary-bar">
       <span>Personality: <b>${escapeHtml(a.personality||'—')}</b></span>
       <span>Wealth: <b>$${(a.wealth||0).toLocaleString(undefined,{maximumFractionDigits:0})}</b></span>
       <span>Return: <b class="${ret>=0?'pos':'neg'}">${ret>=0?'+':''}${ret.toFixed(2)}%</b></span>
       <span>Total Rounds: <b>${rows.length}</b></span>
-    </div>${body}`;
+      ${usageChip}
+    </div>${moodChartSvg(rows)}${body}`;
   document.getElementById('agentTimelineModal').classList.add('show');
 }
 
@@ -2930,10 +3085,36 @@ function triggerLibraryEvent(name){
 }
 
 /* ---- Utility ---- */
+/* Sum the running LLM spend across all agents and show it in the top bar.
+
+   Reads the per-agent totals the last round returned rather than polling
+   /api/usage: the numbers are already in hand, and a chip that lags the
+   round it belongs to would be worse than no chip. A model with no price
+   row still contributes tokens, so the cost is marked as a floor. */
+function updateRunCost(){
+  const el=document.getElementById('runCost');
+  if(!el)return;
+  let calls=0,tokens=0,cost=0,complete=true,any=false;
+  Object.values(sim.agents).forEach(a=>{
+    const t=a.usage&&a.usage.total;
+    if(!t||!t.calls)return;
+    any=true;
+    calls+=t.calls;tokens+=t.total_tokens||0;cost+=t.cost_usd||0;
+    if(t.cost_complete===false)complete=false;
+  });
+  if(!any){el.hidden=true;return;}
+  el.hidden=false;
+  el.innerHTML=`💸 <b>${fmtCost(cost,complete)}</b> · ${tokens.toLocaleString()} tok · ${calls} calls`;
+  el.title=complete
+    ?`${calls} LLM calls this run, ${tokens.toLocaleString()} tokens.`
+    :`${calls} LLM calls this run, ${tokens.toLocaleString()} tokens. Some models have no price row in model_prices.json, so this is a lower bound.`;
+}
+
 function updateTopBar(){
   document.getElementById('topRound').textContent=`Round ${sim.round} / ${sim.total}`;
   const pct=sim.total>0?Math.min(100,Math.round(sim.round/sim.total*100)):0;
   document.getElementById('rpFill').style.width=pct+'%';
+  updateRunCost();
   syncPlayerPanel();
   renderStockList();
   updateStockPanel();
@@ -2966,6 +3147,16 @@ function disableStepButtons(disabled){
 function closeModal(id){document.getElementById(id).classList.remove('show');}
 
 function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
+
+/* Render a USD cost. Sub-cent runs are the common case early on, so they get
+   four decimals rather than rounding away to $0.00. `complete=false` marks a
+   total that is missing unpriced models — a floor, not the whole bill. */
+function fmtCost(cost,complete){
+  if(cost===null||cost===undefined)return 'n/a';
+  const n=Number(cost)||0;
+  const text=(n>0&&n<0.01)?'$'+n.toFixed(4):'$'+n.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+  return complete===false?text+'+':text;
+}
 
 /* ---- Agent social data (feeds the expandable row details) ---- */
 async function loadSocialData(){
@@ -3085,13 +3276,13 @@ document.addEventListener('keydown',(e)=>{
   const drawerOpen=document.getElementById('socialOverlay').classList.contains('show')
     ||document.getElementById('settingsOverlay').classList.contains('show');
   if(document.querySelector('.modal-overlay.show')||drawerOpen){
-    if(e.key==='c'||e.key==='C')openChatPanel(true);
+    if((e.key==='c'||e.key==='C')&&!sim.thinking)openChatPanel(true);
     return;
   }
   if(e.key===' '){e.preventDefault();runStep();}
   else if(e.key==='a'||e.key==='A'){if(sim.running)toggleAuto();}
   else if(e.key==='s'||e.key==='S'){if(sim.running)endSim();}
-  else if(e.key==='c'||e.key==='C'){openChatPanel(true);}
+  else if(e.key==='c'||e.key==='C'){if(!sim.thinking)openChatPanel(true);}
   else if(e.key==='n'||e.key==='N'){toggleGraphOpen();}
   else if(e.key==='e'||e.key==='E'){exportReport();}
 });
@@ -3115,7 +3306,7 @@ const GUIDE_SECTIONS=[
 <li><b>Next Round ▶</b> (<span class="guide-tag">Space</span>): every AI agent observes the market, decides, and trades once.</li>
 <li><b>▶ Auto</b> (<span class="guide-tag">A</span>) plays rounds continuously; the speed selector changes the delay.</li>
 <li>The <b>progress bar</b> in the top bar shows how many rounds remain. Press <b>⏹ End</b> to finish early and see results.</li>
-<li>While agents are thinking, a full-screen overlay blocks clicks — wait for it to clear.</li>
+<li>While agents are thinking the page stays interactive — only Chat is paused until the round finishes.</li>
 </ul>`},
 {id:'stocks',icon:'📈',title:'Stocks & History',html:`
 <p>All configured stocks live in the <b>left column</b>; click one to switch the chart.</p>
@@ -3141,8 +3332,10 @@ const GUIDE_SECTIONS=[
 <ul>
 <li>Click an agent row to expand: cash, holdings, wealth, round Δ, per-stock orders and this round's <b>reasoning</b>, one line per stock.</li>
 <li>In deep mode, <b>Mood</b> bars (0-10: confidence, stress, frustration) move round to round.</li>
-<li>📋 <b>Timeline</b> opens a log of every decision the agent ever made, with reasoning and outcome.</li>
+<li>📋 <b>Timeline</b> opens a log of every decision the agent ever made, with reasoning and outcome. In deep mode it starts with a <b>mood chart</b> tracing confidence, stress and frustration across every round on a fixed 0-10 scale, and each row shows that round's three values beside the trade they went with.</li>
+<li>The timeline header also shows what that agent has cost so far — calls, tokens and dollars.</li>
 <li>💬 Chat (<span class="guide-tag">C</span>) talks to an agent in character via its API.</li>
+<li>💸 The top bar tracks the run's <b>LLM spend</b> — cost, tokens and calls — as it accumulates. A model with no price row in <code>model_prices.json</code> still has its tokens counted; the cost then shows a <code>+</code> to mark it a lower bound.</li>
 </ul>`},
 {id:'grading',icon:'🏆',title:'Agent Grading',html:`
 <p>After every round each agent earns a <b>score 0-100 + grade</b> — shown as a colored badge next to its name and in the leaderboard (hover for the exact score).</p>
@@ -3166,8 +3359,7 @@ const GUIDE_SECTIONS=[
 {id:'social',icon:'🕸',title:'Social Network',html:`
 <p>Agents have relationships: an <b>idol</b>, <b>friends</b> and <b>enemies</b>.</p>
 <ul>
-<li>Friends'/idol's trades are <b>mimicked</b>; enemies' trades are <b>faded</b> (traded against) — creating herding and bank-run cascades.</li>
-<li>Strength comes from the <b>Social Influence</b> slider on the homepage (0 = off).</li>
+<li>In <b>deep mode</b>, an agent's prompt can quote what its <b>idol / friends / enemies</b> did — and actually said — last round (<i>What others are saying</i>). How much it sways the trader is the model's call; nothing overrides its decision.</li>
 <li>Expanded agent rows show each relationship; press <span class="guide-tag">N</span> or <b>🕸 Network</b> for the force-directed graph (drag nodes!).</li>
 </ul>`},
 {id:'portfolio',icon:'💼',title:'Your Portfolio',html:`
@@ -3186,7 +3378,7 @@ const GUIDE_SECTIONS=[
 </ul>`},
 {id:'reports',icon:'📥',title:'Reports & Sharing',html:`
 <ul>
-<li><b>📥 Report</b> exports a single self-contained HTML file: price charts with ⚡ markers, wealth curves, final rankings with grades, the full event timeline and every agent's decision log.</li>
+<li><b>📥 Report</b> exports a single self-contained HTML file: price charts with ⚡ markers, wealth curves, final rankings with grades, per-agent mood timelines, the full event timeline, every agent's decision log, and a tokens &amp; cost table. The header pins the prompt version the run used.</li>
 <li><b>🔗 Copy Link</b> copies a read-only URL of that report snapshot.</li>
 <li>In the results dialog you can also Restart or start a New Simulation.</li>
 </ul>`},

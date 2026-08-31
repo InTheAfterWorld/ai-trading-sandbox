@@ -33,6 +33,7 @@ A multi-agent stock market sandbox where autonomous LLM traders with distinct pe
 - [Configuration](#configuration)
 - [Personality Presets](#personality-presets)
 - [Deep Personality Mode](#deep-personality-mode)
+- [Tokens, Cost & Prompt Versions](#tokens-cost--prompt-versions)
 - [As a Library](#as-a-library)
 - [API Reference](#api-reference)
 - [Project Structure](#project-structure)
@@ -81,6 +82,15 @@ can emerge from interactions between autonomous AI agents.
   price moves since execution to learn from its own outcomes.
 - **Grading** — every agent gets a blended 0-100 score + S/A/B/C/D grade from
   return, Sharpe, drawdown, and win rate.
+- **Token & cost accounting** — every LLM call is counted per agent, tagged by
+  round, and priced. The running spend sits in the dashboard's top bar, so a
+  long run is not a surprise on a billing page later.
+- **Prompt versioning** — each run records the prompt generation and a content
+  hash of the prompt every agent actually ran on, so an old report can never
+  be silently reinterpreted against a newer prompt.
+- **Mood timeline** — in deep mode, an agent's decision log traces all three
+  mood axes (confidence / stress / frustration) round by round, next to the
+  trades they accompanied.
 - **Social relationships** — idol / friends / enemies decide which other
   traders an agent pays attention to: their recent moves, and in deep mode
   their stated reasoning.
@@ -257,6 +267,37 @@ Tick **Deep personality simulation** on the homepage (or pass
 Mood is model-reported, so deep runs are not bit-for-bit reproducible, and the
 longer prompts cost more tokens. Pair it with a fast model.
 
+## Tokens, Cost & Prompt Versions
+
+Every provider call an agent makes is recorded: the round it belonged to,
+whether it was a decision or a repair re-ask, the tokens it moved, and what it
+cost. The dashboard shows the running total in the top bar and the per-agent
+figure in each trader's 📋 Timeline; `sim.report()` prints a per-agent table at
+the end of a CLI run, and `GET /api/usage` returns the full breakdown including
+a per-round cost curve.
+
+Prices live in `ai_trading_society/model_prices.json`, in USD per 1M tokens.
+**The table is user-maintained**: it ships only the rows this project could
+verify against a first-party source, so most models start unpriced. An unpriced
+model is still counted in full — its tokens are exact — but its cost is
+reported as unknown rather than as zero, and any total that includes one is
+marked as a lower bound (`$1.23+`). Add your own rows to that file, or point
+`ATS_MODEL_PRICES` at your own:
+
+```bash
+ATS_MODEL_PRICES=/path/to/my_prices.json python run.py
+```
+
+A provider that returns no usage block at all falls back to a character-based
+token estimate, flagged as an estimate wherever it appears.
+
+Alongside the cost, each run records **which prompt produced it**:
+`prompt_template_version` (bumped by hand when the shipped prompt changes in a
+way that should invalidate comparison with older runs) and a fingerprint of the
+text each agent actually sent. Both land in `runs/<run_id>/metadata.json` and in
+the exported HTML report's header. A per-agent `source` distinguishes the
+shipped template, a persona-prefixed one, and a fully custom prompt.
+
 ## As a Library
 
 ```python
@@ -305,6 +346,9 @@ reload one with `load_run_snapshot()`.
 | `PlayerAgent(agent_id, cash, holdings)` | Human trader (absent when spectating). |
 | `EventManager` / `EVENT_TEMPLATES` | 41 event templates across 10 categories. |
 | `load_run_snapshot(run_id)` | Reload a saved run. |
+| `UsageTracker` / `collect_usage(agents)` | Per-agent token & cost accounting; aggregate a roster. |
+| `model_price(model)` / `compute_cost(model, in, out)` | Price lookup; `None` means unpriced, never free. |
+| `PROMPT_TEMPLATE_VERSION` / `describe_prompt(agent)` | Prompt generation and the fingerprint of the prompt in use. |
 | `evaluate_wealth_curve(wealths)` | Sharpe / max-drawdown / volatility / win-rate from a wealth curve. |
 | `grade_performance(ret, sharpe, drawdown, win_rate)` | Blend into a 0-100 score + S/A/B/C/D grade. |
 | `grade_wealth_curve(wealths, initial_wealth)` | Metrics + score + grade in one call. |
@@ -317,6 +361,9 @@ ai_trading_society/
 ├── market_env.py         # Engine: observations, matching, pricing
 ├── market_events.py      # Event system (41 templates)
 ├── simulator.py          # Run loop, reporting, performance grading, CSV export
+├── usage.py              # Token & cost accounting per agent
+├── model_prices.json     # USD per 1M tokens (user-maintained)
+├── prompt_version.py     # Prompt generation + fingerprints
 ├── web/app.py            # Flask dashboard API
 ├── agents/
 │   ├── external_ai_agent.py   # LLM trader (multi-provider, memory)

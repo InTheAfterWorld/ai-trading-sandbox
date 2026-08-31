@@ -89,12 +89,17 @@ def _line_chart_svg(
     y_fmt=_fmt_money,
     x_step: int = 1,
     markers: Optional[List[Dict[str, Any]]] = None,
+    y_min: Optional[float] = None,
+    y_max: Optional[float] = None,
 ) -> str:
     """
     Render one or more polylines into an inline SVG.
 
     series: [{"label", "color", "points": [float, ...]}]
     markers: [{"index", "color", "tip"}] drawn as diamonds above the curve.
+    y_min / y_max pin the vertical axis instead of fitting it to the data --
+    needed for a bounded scale like mood, where autoscaling would magnify a
+    half-point drift into a cliff.
     """
     all_pts = [p for s in series for p in s["points"]]
     if not all_pts:
@@ -103,13 +108,16 @@ def _line_chart_svg(
     pad_l, pad_r, pad_t, pad_b = 64, 16, 14, 26
     w = width - pad_l - pad_r
     h = height - pad_t - pad_b
-    lo: float = min(all_pts)
-    hi: float = max(all_pts)
-    if hi == lo:
-        hi = lo + 1
-    span = hi - lo
-    lo -= span * 0.06
-    hi += span * 0.06
+    if y_min is not None and y_max is not None and y_max > y_min:
+        lo, hi = float(y_min), float(y_max)
+    else:
+        lo = min(all_pts)
+        hi = max(all_pts)
+        if hi == lo:
+            hi = lo + 1
+        span = hi - lo
+        lo -= span * 0.06
+        hi += span * 0.06
 
     max_len = max(len(s["points"]) for s in series)
 
@@ -231,6 +239,110 @@ def _wealth_section(wealth_history: Dict[str, List[float]]) -> str:
     )
     svg = _line_chart_svg(series=series, height=300)
     return f'<div class="chart">{svg}<div class="legend">{legend}</div></div>'
+
+
+# Mood axis colors, matched to the dashboard so a report reads the same way.
+MOOD_COLORS = {
+    "confidence": "#22c55e",
+    "stress": "#f59e0b",
+    "frustration": "#ef4444",
+}
+
+
+def _mood_section(mood_history: Dict[str, List[Dict[str, Any]]]) -> str:
+    """One 0-10 chart per agent, tracing all three mood axes over the run.
+
+    Deep mode only: a simple-mode run has no mood to plot, and an agent
+    whose mood never moved off its baseline is still shown -- a flat line is
+    a real result, not missing data.
+    """
+    if not mood_history:
+        return (
+            '<div class="empty">No mood data — deep personality mode was off '
+            "for this run.</div>"
+        )
+    blocks = []
+    for aid, points in mood_history.items():
+        if not points:
+            continue
+        series = [
+            {
+                "label": axis,
+                "color": color,
+                "points": [float(p.get(axis, 0) or 0) for p in points],
+            }
+            for axis, color in MOOD_COLORS.items()
+        ]
+        legend = " ".join(
+            f'<span><span class="dot" style="background:{c}"></span>{a.title()}</span>'
+            for a, c in MOOD_COLORS.items()
+        )
+        svg = _line_chart_svg(
+            series=series,
+            height=200,
+            y_fmt=lambda v: f"{v:.0f}",
+            y_min=0,
+            y_max=10,
+        )
+        blocks.append(
+            f'<h3 style="margin:18px 0 6px">{_esc(aid)}</h3>'
+            f'<div class="chart">{svg}<div class="legend">{legend}</div></div>'
+        )
+    if not blocks:
+        return '<div class="empty">No mood data.</div>'
+    return "".join(blocks)
+
+
+def _usage_section(usage: Optional[Dict[str, Any]]) -> str:
+    """Per-agent tokens and cost, with the totals row.
+
+    A model with no price row contributes tokens but no cost, so the total
+    is labelled as a floor rather than presented as the final bill.
+    """
+    if not usage or not usage.get("agents"):
+        return '<div class="empty">No API usage was recorded for this run.</div>'
+
+    total = usage.get("total") or {}
+    complete = total.get("cost_complete", True)
+    rows = []
+    for entry in usage["agents"]:
+        t = entry.get("total") or {}
+        cost = (
+            _fmt_money(t.get("cost_usd", 0.0))
+            if entry.get("priced")
+            else '<span class="muted">unpriced</span>'
+        )
+        rows.append(
+            f'<tr><td>{_esc(entry.get("agent_id", "?"))}</td>'
+            f'<td>{_esc(entry.get("provider", ""))}</td>'
+            f'<td>{_esc(entry.get("model", ""))}</td>'
+            f'<td class="num">{t.get("calls", 0)}</td>'
+            f'<td class="num">{t.get("prompt_tokens", 0):,}</td>'
+            f'<td class="num">{t.get("completion_tokens", 0):,}</td>'
+            f'<td class="num">{cost}</td></tr>'
+        )
+    footer_cost = _fmt_money(total.get("cost_usd", 0.0)) + ("" if complete else "+")
+    rows.append(
+        '<tr style="font-weight:700;border-top:2px solid #2a3245">'
+        '<td colspan="3">Total</td>'
+        f'<td class="num">{total.get("calls", 0)}</td>'
+        f'<td class="num">{total.get("prompt_tokens", 0):,}</td>'
+        f'<td class="num">{total.get("completion_tokens", 0):,}</td>'
+        f'<td class="num">{footer_cost}</td></tr>'
+    )
+    note = ""
+    if not complete:
+        note = (
+            '<div class="empty" style="margin-top:8px">Some models have no price '
+            "row in <code>model_prices.json</code>, so the total is a lower "
+            "bound — their tokens are counted, their cost is not.</div>"
+        )
+    return (
+        '<table><thead><tr><th>Agent</th><th>Provider</th><th>Model</th>'
+        '<th class="num">Calls</th><th class="num">Input tok</th>'
+        '<th class="num">Output tok</th><th class="num">Cost</th></tr></thead>'
+        "<tbody>" + "".join(rows) + "</tbody></table>" + note
+    )
 
 
 def _rankings_section(rankings: List[Dict[str, Any]]) -> str:
@@ -366,8 +478,18 @@ def generate_report_html(
     agent_logs: Dict[str, List[Dict[str, Any]]],
     trade_summary: Dict[str, Any],
     generated_at: Optional[str] = None,
+    mood_history: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+    usage: Optional[Dict[str, Any]] = None,
+    prompt_info: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Assemble the full self-contained report page."""
+    """Assemble the full self-contained report page.
+
+    ``mood_history`` is ``{agent_id: [{confidence, stress, frustration}, ...]}``
+    with one entry per round (deep mode only). ``usage`` is the dict from
+    ``usage.collect_usage``. ``prompt_info`` pins the prompt generation the
+    run used, so an old report cannot be silently reinterpreted against a
+    newer prompt.
+    """
     gen_time = generated_at or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     overview_cards = []
@@ -391,6 +513,31 @@ def generate_report_html(
         f'<span class="neg">{ts.get("sells", 0)} sells</span></div></div>',
         f'<div class="card"><div class="lb">Events</div><div class="vl">{len(event_history)}</div></div>',
     ])
+    usage_total = (usage or {}).get("total") or {}
+    if usage_total.get("calls"):
+        cost_text = _fmt_money(usage_total.get("cost_usd", 0.0))
+        if not usage_total.get("cost_complete", True):
+            cost_text += "+"
+        overview_cards.append(
+            '<div class="card"><div class="lb">API Cost</div>'
+            f'<div class="vl">{cost_text}</div>'
+            f'<div class="vl" style="font-size:12px">'
+            f'{usage_total.get("total_tokens", 0):,} tokens · '
+            f'{usage_total.get("calls", 0)} calls</div></div>'
+        )
+
+    prompt_line = ""
+    if prompt_info:
+        prompt_line = (
+            f' · Prompt <b>v{_esc(prompt_info.get("template_version", "?"))}</b>'
+        )
+        deep_fp = (prompt_info.get("fingerprints") or {}).get("deep")
+        simple_fp = (prompt_info.get("fingerprints") or {}).get("simple")
+        if simple_fp or deep_fp:
+            prompt_line += (
+                f' <span class="muted">({_esc(simple_fp or "?")} /'
+                f' {_esc(deep_fp or "?")})</span>'
+            )
 
     doc = f"""<!DOCTYPE html>
 <html lang="en">
@@ -403,7 +550,7 @@ def generate_report_html(
 <body>
 <div class="wrap">
   <h1>📈 AI Trading Sandbox — Simulation Report</h1>
-  <div class="meta">Run <b>{_esc(run_id)}</b> · Seed <b>{_esc(seed)}</b> ·
+  <div class="meta">Run <b>{_esc(run_id)}</b> · Seed <b>{_esc(seed)}</b>{prompt_line} ·
   Generated {gen_time} · read-only snapshot</div>
 
   <h2>Market Overview</h2>
@@ -418,11 +565,17 @@ def generate_report_html(
   <h2>Final Rankings</h2>
   {_rankings_section(rankings)}
 
+  <h2>Mood Timeline</h2>
+  {_mood_section(mood_history or {})}
+
   <h2>Event Timeline</h2>
   {_events_section(event_history)}
 
   <h2>Agent Decision Log</h2>
   {_decision_log_section(agent_logs)}
+
+  <h2>Tokens &amp; Cost</h2>
+  {_usage_section(usage)}
 
   <footer>Generated by AI Trading Sandbox · report is self-contained (no external assets)</footer>
 </div>
