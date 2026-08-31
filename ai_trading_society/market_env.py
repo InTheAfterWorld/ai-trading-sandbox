@@ -549,6 +549,14 @@ class MarketEnv:
 
         return obs
 
+    def standing_for(self, agent_id: str) -> Dict[str, Any]:
+        """Public read of one agent's rank and gap to the leader.
+
+        The observation carries ``standing`` only in deep mode; callers
+        outside the decision path (the chat briefing) need it in both.
+        """
+        return self._standing_for(agent_id)
+
     def _standing_for(self, agent_id: str) -> Dict[str, Any]:
         """Rank this agent by return, and name whoever is leading."""
         returns: Dict[str, float] = {}

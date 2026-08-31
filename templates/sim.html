@@ -1374,15 +1374,18 @@ async function startSim(opts){
 }
 
 /* ---- Step ---- */
-function fetchWithTimeout(url,options={},ms=120000){
+function fetchWithTimeout(url,options={},ms=150000){
   const ctrl=new AbortController();
   const timer=setTimeout(()=>ctrl.abort(),ms);
   return fetch(url,{...options,signal:ctrl.signal}).finally(()=>clearTimeout(timer));
 }
 function fetchStep(){
   // Abort the /api/step request after a hard cap so the "thinking" overlay
-  // can never stay stuck forever if an external AI provider hangs.
-  return fetchWithTimeout('/api/step',{method:'POST'},120000);
+  // can never stay stuck forever if an external AI provider hangs. 150s
+  // clears a single 100s provider call with room to spare; a call that also
+  // burns its one transient retry can still exceed this (see the note on
+  // the SDK timeout in external_ai_agent.py).
+  return fetchWithTimeout('/api/step',{method:'POST'},150000);
 }
 async function runStep(){
   if(!sim.running||sim.busy)return;
@@ -1481,7 +1484,7 @@ async function runStep(){
     }
   }catch(err){
     if(err&&err.name==='AbortError'){
-      showError('Step timed out after 120s — the AI provider is unresponsive. Check the trader API key / endpoint and try again.');
+      showError('Step timed out after 150s — the AI provider is unresponsive. Check the trader API key / endpoint and try again.');
     }else{
       showError('Step failed: '+err.message);
     }
