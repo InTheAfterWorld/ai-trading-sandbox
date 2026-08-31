@@ -1,25 +1,29 @@
 """Render-only WSGI entry point for the AI Trading Sandbox.
 
-This module is the public web deployment entry point. It loads the existing
-Flask routes, removes the localhost-only request guards from the local app,
-and applies a small deployment policy without changing simulation behavior.
+This module is the production entry point for the dedicated Render repo.
+It imports the Flask application object directly, disables localhost-only
+request guards, and adds only deployment-specific behavior.
 """
 
 import os
 
 from flask import request
 
+# IMPORTANT: import the Flask OBJECT directly from app.py.
+# Do not import a module object through the package namespace and then access
+# `.app`; the package may already export `app` as a Flask instance.
 from ai_trading_society.web.app import app
 
-# The local application has localhost-only Host/Origin protections. This repo
-# is the dedicated Render deployment, so those local guards must not run here.
+# The source app is intentionally protected for localhost use. This repo is
+# the separate public Render deployment, so those local Host/Origin guards
+# must not run here.
 app.before_request_funcs[None] = []
 
 # Never return stored trader API keys to a browser in the public deployment.
 os.environ["ATS_REDACT_CONFIG"] = "1"
 
-# Flask is behind Render's HTTPS proxy. Keep browser sessions secure and
-# usable from the single deployed site.
+# Render terminates TLS at its reverse proxy. Use secure, HTTP-only session
+# cookies for the browser-facing deployment.
 app.config.update(
     SESSION_COOKIE_SECURE=True,
     SESSION_COOKIE_HTTPONLY=True,
@@ -29,12 +33,13 @@ app.config.update(
 
 @app.after_request
 def render_headers(response):
-    """Add safe defaults for the Render-hosted application."""
-    origin = request.headers.get("Origin")
+    """Apply conservative security headers and optional explicit CORS."""
+    origin = request.headers.get("Origin", "").rstrip("/")
     host_origin = request.host_url.rstrip("/")
 
-    # Same-origin requests do not require CORS. For an explicitly configured
-    # external frontend, allow only that exact origin.
+    # The dashboard is same-origin, so CORS is normally unnecessary. Keep an
+    # explicit allow-list only for the case where a separate frontend is
+    # intentionally configured later.
     allowed = {
         value.strip().rstrip("/")
         for value in os.environ.get("ATS_CORS_ORIGINS", "").split(",")
@@ -54,10 +59,18 @@ def render_headers(response):
 
 @app.route("/healthz", methods=["GET"])
 def healthz():
+    """Return a lightweight Render health-check response."""
     return {"status": "ok"}
 
 
+# Also expose the conventional WSGI name for platforms that use it.
 application = app
 
+print("[render] WSGI app loaded successfully")
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "10000")), debug=False)
+    app.run(
+        host="0.0.0.0",
+        port=int(os.environ.get("PORT", "10000")),
+        debug=False,
+    )
